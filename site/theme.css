@@ -1,0 +1,55 @@
+/* =====================================================================
+   nixniri / site / theme.css
+   Project-specific theme override for the foss/v1 design system.
+   Only touches the tokens documented as "safe to override" in the
+   design-corbet-ch project-pages theming contract — retints the accent
+   hue to sky blue, distinct from every sibling (nixarch teal, nixk3s
+   blue, nixnas cyan, nixram emerald, nixremote lime, nixgpu red).
+
+   Load order:
+     <link rel="stylesheet" href="https://v1.foss.design.corbet.ch/assets/base.css">
+     <link rel="stylesheet" href="./theme.css">
+
+   Contrast (WCAG 2.1, both directions checked):
+     dark  #38bdf8 on #0b1120 = 8.79:1   · #0b1120 on #38bdf8 = 8.79:1
+     light #0369a1 on #ffffff = 5.93:1   · #ffffff on #0369a1 = 5.93:1
+   ===================================================================== */
+
+:root {
+  /* Dark mode (and default) accent — sky-400. */
+  --accent: #38bdf8;
+  --accent-hover: #7dd3fc;
+  --accent-dim: rgba(56, 189, 248, 0.12);
+  --accent-glow: rgba(56, 189, 248, 0.08);
+  --accent-text: #0b1120;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Darker sky for light mode — 5.93:1 on #ffffff, AA for normal text
+       (computed via WCAG relative luminance, not eyeballed). */
+    --accent: #0369a1;
+    --accent-hover: #075985;
+    --accent-dim: rgba(3, 105, 161, 0.08);
+    --accent-glow: rgba(3, 105, 161, 0.06);
+    --accent-text: #ffffff;
+  }
+}
+
+/* Mirror both variants for the explicit data-theme toggle, so it wins
+   over the OS media query in both directions. */
+:root[data-theme="dark"] {
+  --accent: #38bdf8;
+  --accent-hover: #7dd3fc;
+  --accent-dim: rgba(56, 189, 248, 0.12);
+  --accent-glow: rgba(56, 189, 248, 0.08);
+  --accent-text: #0b1120;
+}
+
+:root[data-theme="light"] {
+  --accent: #0369a1;
+  --accent-hover: #075985;
+  --accent-dim: rgba(3, 105, 161, 0.08);
+  --accent-glow: rgba(3, 105, 161, 0.06);
+  --accent-text: #ffffff;
+}
