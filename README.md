@@ -102,3 +102,30 @@ surface will move as niri itself does; there are no compatibility shims at this 
 ## License
 
 MIT
+
+## Wiring nixdesktop's shared startup list
+
+[nixdesktop](https://github.com/julian-corbet/nixdesktop-corbet-ch) is the compositor-neutral
+policy layer. Its shared components — a notification daemon, a widget shell — append the commands
+they need to a neutral `nixdesktop.startup` list rather than writing into any compositor's
+namespace. (They used to write straight into `nixdesktop.niri.extraStartup`, which is why this
+module was extracted in the first place: that made every shared component unusable for anyone not
+running niri.)
+
+**Nothing splices that list automatically.** A compositor module cannot read an option from a repo
+it does not depend on, so the consumer wires it — the same way it wires this module's read-only
+`idle.command` into nixdesktop's `session.idleAndLock.command`.
+
+niri's startup lines are raw KDL, not bare commands, so the list needs mapping:
+
+```nix
+nixniri.niri.extraStartup =
+  map (c: ''spawn-sh-at-startup "${c}"'') config.nixdesktop.startup;
+```
+
+Use `spawn-sh-at-startup` when the entry is a shell string (it may contain `&&`, variables, or a
+`sleep`); `spawn-at-startup` takes an argv and does not go through a shell.
+
+If you import a nixdesktop component that populates `nixdesktop.startup` and forget this, that
+component is configured and **silently never launches** — no error, because from niri's point of
+view nothing is wrong. If something you configured simply is not running, check this first.
