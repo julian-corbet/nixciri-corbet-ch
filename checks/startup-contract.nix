@@ -38,6 +38,17 @@ let
     config.nixdesktop.startup = [ "noctalia-shell -d" "some-agent --flag" ];
   };
 
+  # nixdesktop's session policy, declaring the locker. The second contract this module reads: the
+  # swayidle assembly and the idle timeouts moved to nixdesktop, and all that stays here is the
+  # lock KEY bind, whose target is read from this option.
+  sessionPolicy = locker: { lib, ... }: {
+    options.nixdesktop.session.idleAndLock.lockCommand = lib.mkOption {
+      type = lib.types.str;
+      default = "swaylock";
+    };
+    config.nixdesktop.session.idleAndLock.lockCommand = locker;
+  };
+
   render = extra: (lib.evalModules {
     modules = [ stubs ../home/niri.nix { nixniri.niri.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
@@ -45,6 +56,7 @@ let
 
   withContract = render [ contract ];
   withoutContract = render [ ];
+  withLocker = render [ (sessionPolicy "waylock") ];
 
   has = haystack: needle: lib.hasInfix needle haystack;
 
@@ -59,6 +71,13 @@ let
     # `withoutContract` is a string at all proves it) and must render none of the contract.
     "evaluates and renders nothing extra when nixdesktop is absent" =
       !(has withoutContract "noctalia-shell");
+
+    # THE LOCK-COMMAND SEAM, both ways. nixdesktop owns the locker's name (it needs it for the
+    # swayidle invocation it now assembles); this module reads it for the Super+Alt+L bind only.
+    "the lock bind follows nixdesktop's declared locker" =
+      has withLocker ''spawn "waylock"'';
+    "the lock bind falls back to swaylock when nixdesktop is absent" =
+      has withoutContract ''spawn "swaylock"'';
 
     # NON-VACUITY — without this, an empty render would make every hasInfix check above pass
     # trivially and the whole file would be a very confident no-op.

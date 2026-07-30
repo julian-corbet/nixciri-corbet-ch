@@ -46,6 +46,24 @@ let
   neutralStartup =
     map (c: ''spawn-sh-at-startup "${c}"'') (config.nixdesktop.startup or [ ]);
 
+  # The screen locker for the Super+Alt+L bind, read from nixdesktop's session policy.
+  #
+  # This module used to own a `lockCommand` option AND assemble the whole swayidle invocation from
+  # its own idle timeouts. Both moved to nixdesktop (`session.idleAndLock`), because neither is a
+  # niri concern: swayidle's invocation is byte-identical under any wlroots compositor, and "lock
+  # after 30 minutes, never suspend" is a statement about the host, not about niri's config syntax.
+  # Keeping them here meant one copy per compositor repo -- the very duplication the old design
+  # said it was avoiding.
+  #
+  # What legitimately remains niri's is this: which KEY locks the screen, and what that key spawns.
+  # So the module reads the locker's name defensively and binds it, owning the bind and nothing else.
+  #
+  # The `or "swaylock"` fallback keeps a standalone niri user (no nixdesktop module in scope) with a
+  # working lock bind rather than an evaluation error. A standalone user wanting a different locker
+  # redefines the bind itself through `binds` -- no capability is lost by this module not having its
+  # own option, and there is no second place to declare the same fact.
+  lockBin = config.nixdesktop.session.idleAndLock.lockCommand or "swaylock";
+
   outputSection =
     if cfg.output != null
     then cfg.output
@@ -215,53 +233,6 @@ in
       description = "App launcher bound to Mod+D (and used by the clipboard-history bind).";
     };
 
-    lockCommand = lib.mkOption {
-      type = lib.types.str;
-      default = "swaylock";
-      description = "Screen locker, bound to Super+Alt+L.";
-    };
-
-    idle = {
-      lockAfterSeconds = lib.mkOption {
-        type = lib.types.nullOr lib.types.ints.positive;
-        default = 300;
-        description = "Seconds of inactivity before locking. Null means `command` below is always null (no idle daemon at all).";
-      };
-      suspendAfterSeconds = lib.mkOption {
-        type = lib.types.nullOr lib.types.ints.positive;
-        default = 600;
-        description = ''
-          Seconds of inactivity before suspending. Null drops the suspend action while
-          keeping the idle lock -- the right setting on any machine that must not suspend
-          but should still lock, e.g. a desktop running in a container that shares its
-          kernel (and therefore its power state) with the host. Ignored entirely if
-          lockAfterSeconds is null, which drops `command` below to null too.
-        '';
-      };
-
-      command = lib.mkOption {
-        type = lib.types.nullOr lib.types.str;
-        readOnly = true;
-        description = ''
-          READ-ONLY, computed from `lockAfterSeconds`/`suspendAfterSeconds`/`lockCommand`:
-          the full swayidle invocation (timeouts and lock command already assembled into
-          one shell command), or null when `lockAfterSeconds` is null.
-
-          This module used to emit that assembled string itself, as its own
-          spawn-sh-at-startup line -- niri has no way to restart a spawn-at-startup command
-          when a running session's config changes, so idle/lock now runs as a systemd user
-          service instead (nixdesktop's home/session.nix `idleAndLock`, whose `command` option
-          wants a finished command, not raw timeouts, precisely so this ASSEMBLY stays in
-          exactly one place instead of being duplicated between the two modules -- now two
-          separate REPOS, nixniri and nixdesktop, so a consumer of both must wire this
-          option's value into `idleAndLock.command` explicitly at their own top-level config;
-          neither repo does it implicitly anymore now that the split is a package boundary,
-          not just a file boundary). This option is that one place; consume it rather than
-          reimplementing the assembly.
-        '';
-      };
-    };
-
     clipboardHistory = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -396,7 +367,7 @@ in
         hotkeyOverlayTitle = "Run an Application";
       };
       "Super+Alt+L" = lib.mkDefault {
-        action = ''spawn "${cfg.lockCommand}"'';
+        action = ''spawn "${lockBin}"'';
         hotkeyOverlayTitle = "Lock the Screen";
       };
 
@@ -523,13 +494,6 @@ in
       (n: lib.nameValuePair "Mod+${toString n}" (lib.mkDefault "focus-workspace ${toString n}"))
       (lib.range 1 cfg.workspaceCount));
 
-    # The assembled swayidle command -- see the `idle.command` option doc for why this
-    # module still owns the assembly even though it no longer spawns the daemon itself.
-    nixniri.niri.idle.command =
-      if cfg.idle.lockAfterSeconds == null
-      then null
-      else "swayidle -w timeout ${toString cfg.idle.lockAfterSeconds} '${cfg.lockCommand} -f'${lib.optionalString (cfg.idle.suspendAfterSeconds != null) " timeout ${toString cfg.idle.suspendAfterSeconds} 'systemctl suspend'"} before-sleep '${cfg.lockCommand} -f' lock '${cfg.lockCommand} -f' unlock 'pkill -USR1 ${cfg.lockCommand}'";
-
     xdg.configFile."niri/config.kdl".text = ''
       // Managed by home-manager (nixniri's home/niri.nix). Hand edits will be overwritten by
       // the next `home-manager switch` -- set options instead.
@@ -584,13 +548,13 @@ in
       // wl-paste watchers, and the idle/lock daemon used to be spawned from here via
       // spawn-at-startup / spawn-sh-at-startup. All four now run as systemd user services
       // owned by nixdesktop's home/session.nix instead (started as units, not niri
-      // spawn-at-startup lines) -- this module no longer names a polkit/keyring binary or a
-      // cliphist watcher command at all. The one exception is the idle daemon's swayidle
-      // invocation: this module still assembles that string (see the `idle.command` option)
-      // since niri.nix's three idle-related options (`idle.lockAfterSeconds`/
-      // `idle.suspendAfterSeconds`/`lockCommand`) are its inputs, and nixdesktop's
-      // home/session.nix deliberately takes a finished command rather than duplicating the
-      // assembly.
+      // spawn-at-startup lines) -- this module no longer names a polkit/keyring binary, a
+      // cliphist watcher command, or an idle daemon at all. There used to be an exception here:
+      // this module assembled the swayidle invocation from its own idle-timeout options, and
+      // nixdesktop took the finished string. That moved to nixdesktop entirely -- swayidle's
+      // invocation is identical under any wlroots compositor and idle timeouts are host policy,
+      // so owning it per-compositor produced one copy per compositor repo. All this module keeps
+      // is the lock KEY bind, whose target it reads from nixdesktop's session policy.
 
       screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
