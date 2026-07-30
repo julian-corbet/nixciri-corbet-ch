@@ -112,20 +112,27 @@ namespace. (They used to write straight into `nixdesktop.niri.extraStartup`, whi
 module was extracted in the first place: that made every shared component unusable for anyone not
 running niri.)
 
-**Nothing splices that list automatically.** A compositor module cannot read an option from a repo
-it does not depend on, so the consumer wires it — the same way it wires this module's read-only
-`idle.command` into nixdesktop's `session.idleAndLock.command`.
+**This module splices that list for you.** Nothing to wire: `home/niri.nix` reads
+`config.nixdesktop.startup` defensively (`or [ ]`) and renders each entry as its own
+`spawn-sh-at-startup` line, ahead of your own `extraStartup` lines — contract entries are session
+components a host's own commands may expect to be running already.
 
-niri's startup lines are raw KDL, not bare commands, so the list needs mapping:
+`spawn-sh-at-startup`, not `spawn-at-startup`: contract entries are shell command *strings* and may
+contain a flag, a pipe, `&&`, or a variable. niri's plain `spawn-at-startup` takes an argv and does
+not go through a shell, so it would mishandle exactly the entries most likely to appear.
 
-```nix
-nixniri.niri.extraStartup =
-  map (c: ''spawn-sh-at-startup "${c}"'') config.nixdesktop.startup;
-```
+If no nixdesktop module is in scope at all, the read yields an empty list and nothing extra is
+rendered. No flake input on nixdesktop is involved, and none is needed; this is the same
+defensive-read idiom nixboot uses for `nixstorage.layout` and nixhost uses for the facts it mirrors.
+The dependency stays one-way: nixdesktop declares the contract and knows nothing about niri.
 
-Use `spawn-sh-at-startup` when the entry is a shell string (it may contain `&&`, variables, or a
-`sleep`); `spawn-at-startup` takes an argv and does not go through a shell.
+> **This used to be your job, and it was a trap.** Earlier versions asked you to write the mapping
+> yourself, on the stated grounds that a compositor module *cannot* read an option from a repo it
+> does not depend on. That premise was simply wrong — a defensive read needs no dependency. The cost
+> of believing it was a silent failure mode: forget the line and the component is fully configured,
+> its files written, and it never launches, with no error possible, because a populated list with no
+> reader is a valid configuration. `checks/startup-contract.nix` now asserts the splice in both
+> directions, since `nix flake check` does not evaluate `homeManagerModules` and so never covered
+> this at all.
 
-If you import a nixdesktop component that populates `nixdesktop.startup` and forget this, that
-component is configured and **silently never launches** — no error, because from niri's point of
-view nothing is wrong. If something you configured simply is not running, check this first.
+`nixniri.niri.extraStartup` remains yours, for raw KDL startup lines this module does not generate.
