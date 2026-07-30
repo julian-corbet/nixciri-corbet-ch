@@ -30,6 +30,22 @@
         default = ./home/niri.nix;
       };
 
+      # ── CHECKS ────────────────────────────────────────────────────────────────────────────
+      # `nix flake check` does NOT evaluate `homeManagerModules` — it lists them as unchecked and
+      # moves on. Since that class is the only thing this repo ships, a green `flake check` here
+      # used to prove nothing whatsoever about the module. This check closes that gap by
+      # evaluating home/niri.nix for real against a minimal home-manager stub.
+      #
+      # It is scoped to the `nixdesktop.startup` seam rather than trying to be a full config
+      # golden-file test: the seam is the part with a SILENT failure mode (a populated contract
+      # with no reader renders nothing and errors nowhere), and silent failures are what a check
+      # earns its keep on. A malformed KDL bind, by contrast, surfaces the moment niri starts.
+      checks = forAllSystems (system: {
+        startup-contract = import ./checks/startup-contract.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+        };
+      });
+
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixpkgs-fmt);
     };
 }

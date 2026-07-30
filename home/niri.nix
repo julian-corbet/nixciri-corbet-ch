@@ -1,12 +1,12 @@
 # home/niri.nix — declarative niri desktop config (home-manager). Complements
-# profiles/niri-desktop.nix (the POLICY layer — which roles the session wants filled); this
+# profiles/desktop.nix (the POLICY layer — which roles the session wants filled); this
 # module owns the user's ~/.config/niri/config.kdl, generated from structured options instead
 # of hand-edited KDL.
 #
 # Nothing here installs anything. nixniri never names a package or an absolute binary path:
 # both are platform-specific (`thunar` on Arch vs `xfce.thunar` in nixpkgs; mate-polkit's agent
 # binary lives at a different path on every distro). A platform backend — nixarch's for
-# Arch/CachyOS — resolves the roles declared in profiles/niri-desktop.nix into real packages,
+# Arch/CachyOS — resolves the roles declared in profiles/desktop.nix into real packages,
 # and supplies the binary paths this module spawns via `binPaths`.
 #
 # LEAN BY DESIGN, same doctrine as home/shell.nix and home/dev.nix: the skeleton (input/layout/
@@ -19,6 +19,32 @@
 { lib, config, ... }:
 let
   cfg = config.nixniri.niri;
+
+  # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired.
+  #
+  # nixdesktop components (noctalia today) append the commands they need to a compositor-neutral
+  # list instead of writing into any one compositor's syntax. Somebody then has to translate that
+  # list into niri's own spawn syntax -- and until now that somebody was the CONSUMER, via a line
+  # this repo's README told them to copy:
+  #
+  #     nixniri.niri.extraStartup = map (c: ''spawn-sh-at-startup "${c}"'') config.nixdesktop.startup;
+  #
+  # Which fails silently when forgotten: the component is configured, its files are written, and it
+  # simply never launches. There is no error, because nothing is wrong -- a populated list with no
+  # reader is a perfectly valid configuration. Both this repo's README and nixscroll's warned about
+  # it in prose, which is the tell that it should never have been the consumer's job.
+  #
+  # Read DEFENSIVELY (`or [ ]`), the same idiom nixhost uses for the facts it mirrors and nixboot
+  # uses for `nixstorage.layout`: a host running niri WITHOUT any nixdesktop module sees an empty
+  # list and renders nothing extra, never an evaluation error. That is what keeps this a one-way
+  # dependency -- nixdesktop declares the contract and knows nothing about niri; this module reads
+  # it and adapts. Reversing that (nixdesktop reading `nixniri.niri.*`) would re-couple the neutral
+  # policy layer to one compositor by name, which is the whole thing its split was for.
+  #
+  # `spawn-sh-at-startup`, not `spawn-at-startup`: contract entries are shell command STRINGS, and
+  # niri's plain spawn form takes an argv, so anything with a flag or a pipe would break under it.
+  neutralStartup =
+    map (c: ''spawn-sh-at-startup "${c}"'') (config.nixdesktop.startup or [ ]);
 
   outputSection =
     if cfg.output != null
@@ -245,7 +271,7 @@ in
         now -- nixdesktop's home/session.nix starts them as a systemd user service -- so this option
         only controls the picker bind, and does nothing useful without that service also
         running. Requires the `cliphist` and `wl-clipboard` packages present (see
-        profiles/niri-desktop.nix).
+        profiles/desktop.nix).
       '';
     };
 
@@ -552,7 +578,7 @@ in
 
       ${lib.concatMapStringsSep "\n" (n: ''workspace "${toString n}"'') (lib.range 1 cfg.workspaceCount)}
 
-      ${lib.concatStringsSep "\n" cfg.extraStartup}
+      ${lib.concatStringsSep "\n" (neutralStartup ++ cfg.extraStartup)}
 
       // The polkit authentication agent, the org.freedesktop.secrets keyring, the cliphist
       // wl-paste watchers, and the idle/lock daemon used to be spawned from here via
