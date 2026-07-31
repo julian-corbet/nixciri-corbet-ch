@@ -38,9 +38,9 @@ let
     config.nixdesktop.startup = [ "noctalia-shell -d" "some-agent --flag" ];
   };
 
-  # nixdesktop's session policy, declaring the locker. The second contract this module reads: the
-  # swayidle assembly and the idle timeouts moved to nixdesktop, and all that stays here is the
-  # lock KEY bind, whose target is read from this option.
+  # nixdesktop's session policy, declaring the locker. The second contract this module reads:
+  # swayidle assembly and idle timeouts are nixdesktop's; this module only reads the lock KEY
+  # bind's target from this option.
   sessionPolicy = locker: { lib, ... }: {
     options.nixdesktop.session.idleAndLock.lockCommand = lib.mkOption {
       type = lib.types.str;
@@ -72,8 +72,8 @@ let
     "evaluates and renders nothing extra when nixdesktop is absent" =
       !(has withoutContract "noctalia-shell");
 
-    # THE LOCK-COMMAND SEAM, both ways. nixdesktop owns the locker's name (it needs it for the
-    # swayidle invocation it now assembles); this module reads it for the Super+Alt+L bind only.
+    # THE LOCK-COMMAND SEAM, both ways. nixdesktop owns the locker's name (needed for the
+    # swayidle invocation it assembles); this module reads it for the Super+Alt+L bind only.
     "the lock bind follows nixdesktop's declared locker" =
       has withLocker ''spawn "waylock"'';
     "the lock bind falls back to swaylock when nixdesktop is absent" =

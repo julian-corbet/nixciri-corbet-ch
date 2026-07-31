@@ -22,24 +22,12 @@ let
 
   # The neutral `nixdesktop.startup` contract, consumed rather than hand-wired.
   #
-  # nixdesktop components (noctalia today) append the commands they need to a compositor-neutral
-  # list instead of writing into any one compositor's syntax. Somebody then has to translate that
-  # list into niri's own spawn syntax -- and until now that somebody was the CONSUMER, via a line
-  # this repo's README told them to copy:
-  #
-  #     nixniri.niri.extraStartup = map (c: ''spawn-sh-at-startup "${c}"'') config.nixdesktop.startup;
-  #
-  # Which fails silently when forgotten: the component is configured, its files are written, and it
-  # simply never launches. There is no error, because nothing is wrong -- a populated list with no
-  # reader is a perfectly valid configuration. Both this repo's README and nixscroll's warned about
-  # it in prose, which is the tell that it should never have been the consumer's job.
-  #
-  # Read DEFENSIVELY (`or [ ]`), the same idiom nixhost uses for the facts it mirrors and nixboot
-  # uses for `nixstorage.layout`: a host running niri WITHOUT any nixdesktop module sees an empty
-  # list and renders nothing extra, never an evaluation error. That is what keeps this a one-way
-  # dependency -- nixdesktop declares the contract and knows nothing about niri; this module reads
-  # it and adapts. Reversing that (nixdesktop reading `nixniri.niri.*`) would re-couple the neutral
-  # policy layer to one compositor by name, which is the whole thing its split was for.
+  # Read DEFENSIVELY (`or [ ]`): a host running niri WITHOUT any nixdesktop module sees an
+  # empty list and renders nothing extra, never an evaluation error. That is what keeps this a
+  # one-way dependency -- nixdesktop declares the contract and knows nothing about niri; this
+  # module reads it and adapts. Reversing that (nixdesktop reading `nixniri.niri.*`) would
+  # re-couple the neutral policy layer to one compositor by name, which is the whole thing its
+  # split was for.
   #
   # `spawn-sh-at-startup`, not `spawn-at-startup`: contract entries are shell command STRINGS, and
   # niri's plain spawn form takes an argv, so anything with a flag or a pipe would break under it.
@@ -48,15 +36,9 @@ let
 
   # The screen locker for the Super+Alt+L bind, read from nixdesktop's session policy.
   #
-  # This module used to own a `lockCommand` option AND assemble the whole swayidle invocation from
-  # its own idle timeouts. Both moved to nixdesktop (`session.idleAndLock`), because neither is a
-  # niri concern: swayidle's invocation is byte-identical under any wlroots compositor, and "lock
-  # after 30 minutes, never suspend" is a statement about the host, not about niri's config syntax.
-  # Keeping them here meant one copy per compositor repo -- the very duplication the old design
-  # said it was avoiding.
-  #
-  # What legitimately remains niri's is this: which KEY locks the screen, and what that key spawns.
-  # So the module reads the locker's name defensively and binds it, owning the bind and nothing else.
+  # swayidle's invocation and idle timeouts are host policy, not a niri concern (byte-identical
+  # under any wlroots compositor), so this module owns only which KEY locks the screen and what
+  # that key spawns -- reading the locker's name defensively and binding it.
   #
   # The `or "swaylock"` fallback keeps a standalone niri user (no nixdesktop module in scope) with a
   # working lock bind rather than an evaluation error. A standalone user wanting a different locker
@@ -134,9 +116,8 @@ let
   };
 
   # Render the flags that go between a bind's key combo and its `{ }` block. Only ever
-  # emits a flag when it differs from niri's own default (see the options above), the same
-  # convention the hand-written config this replaces already followed -- e.g. plain
-  # `Mod+Left { focus-column-left; }`, never `Mod+Left repeat=true { ...; }`.
+  # emits a flag when it differs from niri's own default (see the options above) -- e.g.
+  # plain `Mod+Left { focus-column-left; }`, never `Mod+Left repeat=true { ...; }`.
   renderBindFlags = b: lib.concatStringsSep " " (
     lib.optional (b.hotkeyOverlayTitle != null) ''hotkey-overlay-title="${b.hotkeyOverlayTitle}"''
     ++ lib.optional b.allowWhenLocked "allow-when-locked=true"
@@ -158,9 +139,8 @@ let
       "${name}${lib.optionalString (flags != "") " ${flags}"} { ${value.action}; }";
 
   # `lib.mapAttrsToList` walks `cfg.binds` in `builtins.attrNames` order, which Nix
-  # guarantees is sorted -- so the rendered block is alphabetical by key combo rather than
-  # grouped by topic the way the old hand-written block was. Cosmetic only: niri does not
-  # care what order binds appear in within `binds { }`.
+  # guarantees is sorted -- so the rendered block is alphabetical by key combo. Cosmetic
+  # only: niri does not care what order binds appear in within `binds { }`.
   bindsSection = lib.concatStringsSep "\n    " (
     lib.filter (l: l != null) (lib.mapAttrsToList renderBind cfg.binds)
   );
@@ -545,16 +525,10 @@ in
       ${lib.concatStringsSep "\n" (neutralStartup ++ cfg.extraStartup)}
 
       // The polkit authentication agent, the org.freedesktop.secrets keyring, the cliphist
-      // wl-paste watchers, and the idle/lock daemon used to be spawned from here via
-      // spawn-at-startup / spawn-sh-at-startup. All four now run as systemd user services
-      // owned by nixdesktop's home/session.nix instead (started as units, not niri
-      // spawn-at-startup lines) -- this module no longer names a polkit/keyring binary, a
-      // cliphist watcher command, or an idle daemon at all. There used to be an exception here:
-      // this module assembled the swayidle invocation from its own idle-timeout options, and
-      // nixdesktop took the finished string. That moved to nixdesktop entirely -- swayidle's
-      // invocation is identical under any wlroots compositor and idle timeouts are host policy,
-      // so owning it per-compositor produced one copy per compositor repo. All this module keeps
-      // is the lock KEY bind, whose target it reads from nixdesktop's session policy.
+      // wl-paste watchers, and the idle/lock daemon run as systemd user services owned by
+      // nixdesktop's home/session.nix, not as spawn-at-startup lines here -- this module
+      // names none of those binaries. All it keeps is the lock KEY bind, whose target it
+      // reads from nixdesktop's session policy.
 
       screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
 
