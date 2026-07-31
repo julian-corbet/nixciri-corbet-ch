@@ -10,7 +10,13 @@
 # writes to. It is NOT an attempt to reimplement home-manager: the point is to evaluate THIS
 # module's own logic, and a full home-manager instantiation would add a large dependency for no
 # extra coverage of the thing under test.
-{ pkgs, lib ? pkgs.lib }:
+#
+# `niriModule` arrives here ALREADY partially applied (flake.nix closes `home/niri.nix` over the
+# real, locked `nixhost.lib.probeFact`/`collectProbes` before this check ever runs, the same shape
+# nixscroll's own checks/startup-contract.nix uses for `scrollModule`) -- this file never reaches
+# for the raw `../home/niri.nix` path itself, which would fail outright now that the module takes
+# `{ probeFact, collectProbes }:` as its outer argument.
+{ pkgs, lib ? pkgs.lib, niriModule }:
 let
   stubs = { lib, ... }: {
     options = {
@@ -50,7 +56,7 @@ let
   };
 
   render = extra: (lib.evalModules {
-    modules = [ stubs ../home/niri.nix { nixniri.niri.enable = true; } ] ++ extra;
+    modules = [ stubs niriModule { nixniri.niri.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
   }).config.xdg.configFile."niri/config.kdl".text;
 
@@ -88,7 +94,12 @@ let
   failed = lib.attrNames (lib.filterAttrs (_: passed: !passed) results);
 in
 if failed == [ ]
-then pkgs.runCommand "nixniri-startup-contract-ok" { } "touch $out"
+# `pkgs.emptyFile`, NOT `pkgs.runCommand ... "touch $out"`: a `runCommand` marker's output path is
+# SYSTEM-DEPENDENT, so evaluating this check for a foreign arch under `--all-systems` on x86_64
+# turns "unchecked" into a real foreign-arch BUILD, which fails "platform mismatch" rather than
+# substituting. `emptyFile` is fixed-output content-addressed and substitutes everywhere -- the
+# same fix nixdesktop already applied to its own check markers.
+then pkgs.emptyFile
 else throw ''
   nixniri: the nixdesktop.startup seam is broken. Failing assertions:
   ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}

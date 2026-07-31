@@ -16,6 +16,15 @@
 # assumes a specific keyboard layout, terminal brand, or app list. A consumer wanting kitty
 # instead of foot, a different keyboard layout, messenger auto-launch, or extra keybinds does so
 # via the options below, not by forking this file.
+#
+# `probeFact`/`collectProbes` ARE TAKEN AS A MODULE ARGUMENT, closed over by flake.nix against
+# the real `nixhost.lib` (see flake.nix's own `nixhost` input comment) — the same shape
+# nixscroll's `home/scroll.nix` and nixdesktop's own `modules/session.nix` already use. This is
+# the probeFact MECHANISM only: neither nixdesktop nor nixgpu is ever a flake input here, and
+# everything read through it below (`nixdesktop.layouts`, `nixdesktop.monitors`,
+# `nixdesktop.sessions`, `nixgpu.stableDevicePaths.devices`) renders nothing at all on a host
+# that never composed the sibling that owns it, silently and correctly.
+{ probeFact, collectProbes }:
 { lib, config, ... }:
 let
   cfg = config.nixniri.niri;
@@ -46,13 +55,327 @@ let
   # own option, and there is no second place to declare the same fact.
   lockBin = config.nixdesktop.session.idleAndLock.lockCommand or "swaylock";
 
-  outputSection =
-    if cfg.output != null
-    then cfg.output
-    else ''
-      // No output declared -- niri auto-detects. Run `niri msg outputs` on-box to find the
-      // real name if you want to pin mode/scale/position.
-    '';
+  # ── Structured output rendering ─────────────────────────────────────────────────────────────
+  #
+  # Replaces the former `nixniri.niri.output` -- a single raw-KDL string interpolated once for
+  # every monitor on every host, which meant nothing here could ever be asserted and no registry
+  # could key on it (a host moving a monitor to a different machine got a block that silently
+  # stopped applying, with no build-time signal anywhere). Two producers feed the same renderer:
+  #
+  #   `cfg.outputs`  -- hand-authored per output, host-specific, the escape/manual path.
+  #   `cfg.layout`   -- a `nixdesktop.layouts.<name>`, translated automatically, portable between
+  #                     hosts because it is keyed by the shared monitor registry rather than by
+  #                     hand-copied EDID text. THE MAIN PATH on a host that composes nixdesktop.
+  #
+  # Both go through `renderOutputBlock`, so there is exactly one place that knows how to turn a
+  # resolved output record into niri KDL -- the "everything that can be got wrong twice is got
+  # right once" doctrine this whole family follows.
+
+  # niri ALWAYS double-quotes its output-match argument -- connector name or identity triple
+  # alike (`output "eDP-1" { ... }`, `output "Some Company CoolMonitor 1234" { ... }`, both from
+  # niri's own upstream docs) -- unlike sway/scroll, which need quoting only when the identity
+  # triple itself contains a space. Quoting unconditionally means a plain connector name and a
+  # multi-word identity triple go through one code path instead of two. Same escaping doctrine as
+  # nixscroll's `home/scroll.nix` `quoteName` -- double quotes are niri's DOCUMENTED grammar here,
+  # not a shell-quoting convention, so this is not `lib.escapeShellArg`.
+  quoteKdl = n: ''"${lib.replaceStrings [ ''"'' ] [ ''\"'' ] n}"'';
+
+  # niri's `modeline` directive (KDL, since niri 25.11) takes the SAME nine timing numbers, in
+  # the SAME order, as nixdesktop's neutral `modeline` string (`modules/layouts.nix`) -- but niri
+  # wants its trailing sync-polarity flags as QUOTED KDL strings (`"-hsync" "+vsync"`), while the
+  # neutral spelling, copied verbatim from sway/scroll's own unquoted grammar, carries none.
+  # Requoting only the trailing tokens is the ENTIRE translation; the nine leading numbers pass
+  # through byte-identical, and so does their order (verified against niri's own modeline example:
+  # `173.00 1920 2048 2248 2576 1080 1083 1088 1120 "-hsync" "+vsync"` is pixelclock/hdisp/
+  # hsyncstart/hsyncend/htotal/vdisp/vsyncstart/vsyncend/vtotal, the identical field order
+  # nixdesktop's own `parseModeline` reads fields 2 and 6 out of).
+  renderModeline =
+    raw:
+    let
+      toks = lib.filter (t: t != "")
+        (lib.splitString " " (lib.replaceStrings [ "\t" "\n" ] [ " " " " ] raw));
+      numeric = lib.take 9 toks;
+      flags = lib.drop 9 toks;
+    in
+    lib.concatStringsSep " " (numeric ++ map (f: ''"${f}"'') flags);
+
+  # The shared field shape both `cfg.outputs` entries and a translated
+  # `nixdesktop.layouts.<name>.outputs.*` entry present to the renderer below. Mirrors the shape
+  # nixscroll's own `programs.scroll.outputs` submodule already uses (an attrset of typed fields
+  # per output), not its exact field list -- niri's own directives differ from scroll's.
+  outputEntryOptions = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Whether this output is on. `false` renders niri's own `off` flag and NOTHING else --
+        that is niri's documented shape for a disabled output (`output "X" { off }`), and
+        emitting sibling fields alongside it is needless noise niri's own examples never carry.
+      '';
+    };
+
+    mode = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "3840x2160@60";
+      description = ''
+        `WIDTHxHEIGHT@REFRESH`, or `null` to let niri auto-detect. The refresh rate, if given,
+        must match what `niri msg outputs` reports down to the same decimal digits -- niri's
+        own requirement, not this module's.
+      '';
+    };
+
+    modeline = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
+      description = ''
+        A raw modeline in nixdesktop's neutral, UNQUOTED spelling -- nine timing numbers then
+        bare sync flags (`+hsync +vsync`), the identical string
+        `nixdesktop.layouts.<name>.outputs.*.modeline` carries. This module requotes the
+        trailing flags for niri's own grammar (see `renderModeline` above); write it unquoted
+        here regardless of which compositor eventually reads it. `null` (default) omits the
+        directive.
+      '';
+    };
+
+    scale = lib.mkOption {
+      type = lib.types.nullOr lib.types.numbers.positive;
+      default = null;
+      example = 1.5;
+      description = "Logical-pixel scale, or `null` for niri's own guess from physical size.";
+    };
+
+    position = lib.mkOption {
+      type = lib.types.nullOr (lib.types.submodule {
+        options = {
+          x = lib.mkOption { type = lib.types.int; description = "Logical-pixel X."; };
+          y = lib.mkOption { type = lib.types.int; description = "Logical-pixel Y."; };
+        };
+      });
+      default = null;
+      description = ''
+        Top-left corner in niri's logical coordinate space, or `null` to let niri place it
+        automatically (see niri's own "Automatic Positioning" documentation).
+      '';
+    };
+
+    transform = lib.mkOption {
+      type = lib.types.enum [
+        "normal"
+        "90"
+        "180"
+        "270"
+        "flipped"
+        "flipped-90"
+        "flipped-180"
+        "flipped-270"
+      ];
+      default = "normal";
+      description = ''
+        How the output is turned, COUNTER-CLOCKWISE -- niri's own vocabulary. Read from
+        nixdesktop's neutral `nixdesktop.layouts` (identical spelling, identical direction),
+        this PASSES THROUGH UNCHANGED: contrast nixscroll's translator, which must swap
+        90<->270 and flipped-90<->flipped-270 because sway/scroll's own grammar is clockwise.
+        See nixdesktop's `modules/layouts.nix` `transform` option for the measured detail.
+        Getting either translator's direction wrong rotates a monitor backwards in a way
+        invisible from either compositor's own IPC (sway inverts back when reporting).
+      '';
+    };
+  };
+
+  # One `output "..." {}` block. `matchName` is whatever niri should match on -- a connector
+  # name or an identity triple -- this function has no opinion which; `o` is any record carrying
+  # the fields in `outputEntryOptions` above (a `cfg.outputs.<name>` submodule value, or a plain
+  # attrset built from a translated `nixdesktop.layouts` entry -- both are read identically).
+  renderOutputBlock =
+    matchName: o:
+    let
+      body =
+        if !o.enable then [ "off" ]
+        else lib.filter (l: l != null) [
+          (if o.mode != null then "mode ${quoteKdl o.mode}" else null)
+          (if o.modeline != null then "modeline ${renderModeline o.modeline}" else null)
+          (if o.scale != null then "scale ${toString o.scale}" else null)
+          (if o.position != null
+            then "position x=${toString o.position.x} y=${toString o.position.y}"
+            else null)
+          "transform ${quoteKdl o.transform}"
+        ];
+    in
+    ''
+      output ${quoteKdl matchName} {
+          ${lib.concatStringsSep "\n    " body}
+      }'';
+
+  # ── Consuming nixdesktop.layouts / nixdesktop.monitors, through lib.probeFact ────────────────
+  #
+  # Both are `let`-bound but never FORCED unless `cfg.layout != null` actually asks for them
+  # (Nix bindings are lazy) -- so a host that never sets `nixniri.niri.layout` pays nothing and,
+  # crucially, never sees a spurious "did not resolve" warning for a namespace it was never
+  # trying to read in the first place. See the `layout` option below for why gating on intent
+  # rather than probing unconditionally is the right call here: `nixdesktop.layouts` and
+  # `nixdesktop.monitors` are each their own composable module inside nixdesktop, so a host
+  # importing only nixdesktop's session-policy or startup-contract module has neither composed at
+  # all -- a legitimate, silent state this module must not warn about.
+  layoutsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "layouts" ];
+    fallback = { };
+  };
+
+  monitorsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "monitors" ];
+    fallback = { };
+  };
+
+  # nixdesktop.layouts.<cfg.layout>.outputs, translated into one-or-more resolved output records
+  # each fed to `renderOutputBlock`. An entry addressed `match = "connector"` becomes exactly one
+  # block, keyed by its connector name. An entry addressed `match = "identity"` becomes one block
+  # PER IDENTITY VARIANT the panel can present -- its own `identifier` AND every one of its
+  # `aliases`' `identifier`s, because the SAME physical panel reports a DIFFERENT EDID per input
+  # (nixdesktop's `modules/monitors.nix` header) and niri matches on whichever string the
+  # connected wire happens to report. A block missing for the currently-live variant behaves
+  # exactly like no block at all -- the output silently keeps its default mode/position/scale --
+  # so every variant gets the identical rendered fields.
+  layoutOutputBlocks =
+    if cfg.layout == null then [ ]
+    else
+      let
+        layout = layoutsProbe.value.${cfg.layout};
+        resolvedEntry = o: {
+          inherit (o) enable mode modeline scale position transform;
+        };
+        matchNamesOf = o:
+          if o.match == "connector" then [ o.connector ]
+          else
+            let m = monitorsProbe.value.${o.monitor}; in
+            [ m.identifier ] ++ map (a: a.identifier) m.aliases;
+      in
+      lib.concatMap
+        (o: map (name: renderOutputBlock name (resolvedEntry o)) (matchNamesOf o))
+        layout.outputs;
+
+  # ── Consuming nixdesktop.sessions.<cfg.session>.{permittedDevices,deniedDevices} ─────────────
+  #
+  # niri has NO allowlist -- it enumerates every DRM device on the seat unconditionally -- so the
+  # only lever is `debug { ignore-drm-device }`, the COMPLEMENT of the permitted set over the
+  # WHOLE inventory (already computed once, by nixdesktop's own `modules/session.nix`), plus
+  # `debug { render-drm-device }` naming the single PRIMARY permitted device
+  # (`permittedDevices` is ordered primary-first: "exclusive" claims before "shared" ones -- see
+  # nixdesktop's own module). This is why nixdesktop's device inventory must be COMPLETE: a
+  # device that exists but was never declared there is in NEITHER list, so it is never ignored
+  # and leaks straight into niri's enumeration -- on this estate that would mean the forbidden
+  # RX 6800 being opened by the one session forbidden to touch it.
+  #
+  # nixdesktop hands back DEVICE NAMES ("amd", "ast", "evdi"), not paths -- see
+  # `permittedDevices`/`deniedDevices`'s own option headers in nixdesktop's `modules/session.nix`.
+  # A launcher resolving a NAME to a live path at process-start time is the right answer for
+  # scroll, because `WLR_DRM_DEVICES` is an environment variable wlroots reads when it starts --
+  # but niri reads `debug { render-drm-device; ignore-drm-device; }` STRAIGHT OUT OF config.kdl
+  # ON DISK, with no launcher step in between, so a bare name sitting in that file matches no
+  # live device niri has ever heard of and enforces NO restriction at all while looking like
+  # perfectly valid KDL. `stableDevicePathsProbe` below is the second half of the translation
+  # this file owns: NAME -> stable `/dev/dri/by-path/*` PATH, resolved at Nix eval time via
+  # `nixgpu.stableDevicePaths.devices` (the same registry nixdesktop's own inventory mirror is
+  # keyed from) -- see `devicePathFor`.
+  sessionsProbe = probeFact {
+    inherit config;
+    namespace = "nixdesktop";
+    path = [ "sessions" ];
+    fallback = { };
+  };
+
+  # The niri `debug` namespace excludes itself from niri's own config stability policy (see the
+  # `session`/`package` options), so this module pins itself to the exact niri release range its
+  # `render-drm-device`/`ignore-drm-device` translation was verified against, rather than
+  # trusting "it happens to still parse". `ignore-drm-device` shipped in niri 25.11 (niri's own
+  # Configuration: Debug Options wiki page: "Since: 25.11") -- a niri older than that has no way
+  # to express a denylist at all, so this module's whole device-restriction mechanism is
+  # unavailable below it. No upper bound yet: raise this once a future niri release is verified
+  # to have renamed or dropped either key.
+  minNiriDebugDeviceVersion = "25.11";
+
+  stableDevicePathsProbe = probeFact {
+    inherit config;
+    namespace = "nixgpu";
+    path = [ "stableDevicePaths" "devices" ];
+    fallback = { };
+  };
+
+  # `renderPath` is preferred (niri's own wiki examples exclusively show `renderD*` paths), but
+  # `cardPath` is not a fallback of last resort -- it is the CORRECT, COMPLETE answer for a
+  # device niri's own source proves has no render node to name. Verified against niri's real
+  # `primary_node_from_render_node` (niri 26.04, `src/backend/tty.rs`; both `render-drm-device`
+  # and `ignore-drm-device` route through it): given a path that is not itself a render node, it
+  # looks up that node's render-node SIBLING and uses it, and when no sibling exists at all --
+  # exactly the evdi / AST-BMC-framebuffer case, `hasRenderNode = false` -- it falls back to the
+  # node it was given, for both halves of the pair, logging a warning and returning no error. So
+  # a card-only device's `cardPath` resolves correctly here, matching niri's own documented
+  # fallback rather than working around it.
+  devicePathFor = deviceName:
+    let d = stableDevicePathsProbe.value.${deviceName};
+    in if d.renderPath != null then d.renderPath else d.cardPath;
+
+  deviceDebugLines =
+    if cfg.session == null then [ ]
+    else
+      let
+        s = sessionsProbe.value.${cfg.session};
+        permitted = s.permittedDevices;
+        denied = s.deniedDevices;
+      in
+      lib.optional (permitted != [ ])
+        "render-drm-device ${quoteKdl (devicePathFor (lib.head permitted))}"
+      ++ map (d: "ignore-drm-device ${quoteKdl (devicePathFor d)}") denied;
+
+  # REAL /dev/dri/by-path/* PATHS, not device names -- the opposite of what an earlier version of
+  # this file rendered here. niri reads `debug { render-drm-device; ignore-drm-device; }`
+  # STRAIGHT OUT OF config.kdl ON DISK; there is no launcher step between home-manager writing
+  # this file and niri parsing it, so a bare NAME here (unlike scroll's `WLR_DRM_DEVICES`, an
+  # environment variable a launcher genuinely can still resolve at process-start time) would
+  # parse as a perfectly valid config that restricts NOTHING: niri matches it against a live
+  # sysfs path, finds no device by that name, and enumerates every DRM device on the seat exactly
+  # as if `session` had never been set -- silently. `address`, and `cardPath`/`renderPath` derived
+  # from it, ARE knowable at Nix eval time (a PCI slot or platform device name, fixed at
+  # build/install time, unlike a card NUMBER, which is enumeration order and genuinely
+  # renumbers -- see nixgpu's own `stableDevicePaths.devices.<name>.address` header), which is
+  # exactly what lets this module bake the real path in here instead of deferring to a runtime
+  # resolver niri would never call.
+  deviceDebugBlock =
+    if deviceDebugLines == [ ] then ""
+    else
+      ''
+
+        // ⚠ VOLATILE: both keys below live under niri's own `debug` namespace, which niri's
+        // documentation explicitly excludes from its config breaking-change policy -- an
+        // upgrade can rename or remove either silently. See nixniri's `session` and `package`
+        // options -- `package`, once set, turns this from a comment into a build-time assertion.
+        debug {
+            ${lib.concatStringsSep "\n    " deviceDebugLines}
+        }'';
+
+  # Every block this module knows how to produce, in one list: hand-authored entries first
+  # (`cfg.outputs`, keyed by `lib.attrNames` order, which Nix guarantees sorted), then the
+  # layout-derived blocks, then the raw escape hatch. Attribute-name order is stable and
+  # cosmetic-only here -- niri applies whichever block matches the live output, regardless of
+  # where in the file it appears.
+  outputsSection =
+    let
+      manualBlocks = lib.mapAttrsToList renderOutputBlock cfg.outputs;
+      allBlocks = manualBlocks ++ layoutOutputBlocks;
+    in
+    if allBlocks == [ ] && cfg.extraOutputs == "" then
+      ''
+        // No output declared -- niri auto-detects. Run `niri msg outputs` on-box to find the
+        // real name if you want to pin mode/scale/position: `nixniri.niri.outputs` (manual,
+        // per-host) or `nixniri.niri.layout` (nixdesktop-derived, portable between hosts).
+      ''
+    else
+      lib.concatStringsSep "\n\n" (allBlocks ++ lib.optional (cfg.extraOutputs != "") cfg.extraOutputs);
 
   presetWidthsSection = lib.concatMapStringsSep "\n        " (p: "proportion ${toString p}") cfg.presetColumnWidths;
 
@@ -164,17 +487,145 @@ in
       };
     };
 
-    output = lib.mkOption {
-      type = lib.types.nullOr lib.types.lines;
-      default = null;
-      example = ''
-        output "HDMI-A-1" {
-            mode "3840x2160@60"
+    outputs = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule { options = outputEntryOptions; });
+      default = { };
+      example = lib.literalExpression ''
+        {
+          "eDP-1" = { enable = false; };
+          "Dell Inc. DELL U4323QE 9BQR2P3" = {
+            mode = "3840x2160@60";
+            scale = 1.5;
+            position = { x = 0; y = 0; };
+          };
         }
       '';
       description = ''
-        Raw KDL for one or more `output {}` blocks. Null (default) leaves output
-        configuration to niri's own auto-detection.
+        One niri `output "..." {}` block per entry, keyed by the EXACT string niri should match
+        an output against -- a connector name ("eDP-1", "HDMI-A-1") or the
+        "<make> <model> <serial>" identity triple (see nixdesktop's `modules/monitors.nix` for
+        how that triple is built, on a host that composes it). This module never inspects the
+        key: it quotes it and writes it, unconditionally, the identical structural shape
+        nixscroll's `programs.scroll.outputs` already uses.
+
+        THE MAIN PATH for a host with no `nixdesktop.layouts` to name -- this REPLACES the
+        former `nixniri.niri.output` (a single raw-KDL string interpolated once for every
+        monitor, in which nothing could ever be asserted and no registry could key on it). On a
+        host that composes nixdesktop, prefer naming a `layout` (below) instead of hand-filling
+        this option: a layout is portable between hosts and keyed by the shared registry, this
+        option is host-specific hand-typed text. The two are additive -- both render into the
+        same generated file -- for the case where a host wants nixdesktop's registry for most
+        outputs and a hand-authored stanza for one it does not.
+      '';
+    };
+
+    layout = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "docked";
+      description = ''
+        A `nixdesktop.layouts.<name>` to render as niri output blocks, read through
+        `lib.probeFact` (see this file's own top-of-file comment on the `probeFact` module
+        argument, and the README on the `nixhost` flake input this needs -- never a flake input
+        on nixdesktop itself).
+
+        Each layout entry becomes ONE OR MORE `output {}` blocks: an entry addressed by
+        `match = "connector"` becomes exactly one, keyed by its connector name; an entry
+        addressed by `match = "identity"` becomes one block per identity variant the panel can
+        present -- the monitor's own `identifier` AND every one of its `aliases`' `identifier`s
+        (the SAME panel through a different input reports a DIFFERENT EDID, see nixdesktop's
+        `modules/monitors.nix` header) -- because niri matches on whichever string the connected
+        wire happens to report, and a block missing for the currently-live variant behaves
+        exactly like no block at all.
+
+        `transform` PASSES THROUGH UNCHANGED: nixdesktop's neutral vocabulary is
+        counter-clockwise, matching `wl_output` (and niri's own config values) exactly, so this
+        translator does no inversion at all. Contrast nixscroll's translator, which MUST swap
+        90<->270 and flipped-90<->flipped-270, because sway/scroll's own config grammar is
+        clockwise -- see nixdesktop's `modules/layouts.nix` `transform` option for the measured
+        detail. Getting either translator's direction wrong rotates a monitor backwards in a
+        way invisible from either compositor's own IPC.
+
+        `null` (default) renders no layout-derived blocks at all -- the correct, silent stance
+        for a host with no `nixdesktop.layouts` composed, or that only wants `outputs` above.
+        Naming a layout that `nixdesktop.layouts` does not declare (or that nixdesktop is not
+        composed on this host at all) is a build failure, not a silent no-op -- see this
+        module's own `assertions`.
+      '';
+    };
+
+    session = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "devhome";
+      description = ''
+        A `nixdesktop.sessions.<name>` whose resolved `permittedDevices`/`deniedDevices`
+        becomes this niri instance's device restriction, read through `lib.probeFact`. niri has
+        NO allowlist -- it enumerates every DRM device on the seat unconditionally -- so the
+        only lever is `debug { ignore-drm-device }`, one per device this session may NOT touch
+        (the complement of the permitted set over the WHOLE inventory, already computed by
+        nixdesktop's `modules/session.nix`), plus `debug { render-drm-device }` naming the
+        single PRIMARY permitted device. This is why nixdesktop's device inventory must be
+        COMPLETE: a device that exists but was never declared is in neither list, so it is
+        never ignored and leaks straight into niri's enumeration.
+
+        nixdesktop hands back DEVICE NAMES ("amd", "ast", "evdi"); this module resolves each one
+        to a stable `/dev/dri/by-path/*` PATH via `nixgpu.stableDevicePaths.devices.<name>.
+        {cardPath,renderPath}` (also read through `lib.probeFact`) and renders PATHS, never
+        names, into the `debug` block. That resolution has to happen HERE, at Nix eval time:
+        niri reads `config.kdl` straight off disk, with no launcher step in between, so a bare
+        name would parse as valid KDL matching no live device and enforce nothing at all --
+        silently. A card NUMBER (`/dev/dri/card1`) is the one spelling that could not be used
+        instead: DRM minors are enumeration order and genuinely renumber on live hardware (an
+        evdi module load renumbered this estate's host on 2026-07-29). `address` does not: it is
+        a PCI slot or platform device name, fixed at build/install time, which is exactly what
+        makes `cardPath`/`renderPath` safe to bake in here rather than defer to a resolver niri
+        would never call. Naming a device that `nixgpu.stableDevicePaths.devices` does not
+        declare, or that declares no `address`, is a build failure -- see this module's own
+        `assertions`.
+
+        ⚠ Both `debug` keys live under niri's own `debug` namespace, which niri's documentation
+        explicitly excludes from its config breaking-change policy -- a niri upgrade can rename
+        or remove either with no notice. Setting `session` therefore REQUIRES `package` too (see
+        that option, below): this module asserts `package`'s own `.version` is new enough to
+        still have these keys, so an incompatible niri upgrade fails the build instead of
+        silently rendering a `debug` block niri no longer understands, and therefore no longer
+        enforces.
+
+        `null` (default): no device restriction is rendered at all. Naming a session that
+        `nixdesktop.sessions` does not declare (or that nixdesktop is not composed on this host
+        at all) is a build failure -- see this module's own `assertions`.
+      '';
+    };
+
+    package = lib.mkOption {
+      type = lib.types.nullOr lib.types.package;
+      default = null;
+      example = lib.literalExpression "pkgs.niri";
+      description = ''
+        The REAL niri package this generated config will run under. Used ONLY to assert its
+        `.version` -- same doctrine as nixscroll's own `package` option (`home/scroll.nix`):
+        never added to `home.packages`, this module installs nothing, a platform backend
+        resolves the real binary that actually runs.
+
+        `null` (the default) is fine for a config that never sets `session`: nothing else here
+        reads niri's own volatile `debug` namespace, so there is no version-sensitive
+        translation to verify. The moment `session` is set, `package` becomes REQUIRED, by
+        assertion, not merely recommended -- device restriction is a security boundary, and
+        whether niri STILL has `render-drm-device`/`ignore-drm-device` (niri's documentation
+        explicitly excludes `debug` from its config stability policy -- either key can be
+        renamed or removed with no notice) is exactly the one fact this module cannot verify
+        without a real package to ask.
+      '';
+    };
+
+    extraOutputs = lib.mkOption {
+      type = lib.types.lines;
+      default = "";
+      description = ''
+        Extra raw KDL, verbatim, appended after every generated `output {}` block -- for
+        whatever the structured `outputs`/`layout` surfaces above cannot express (same
+        escape-hatch doctrine as `extraWindowRules`/`extraBinds`/`extraTopLevel` below).
       '';
     };
 
@@ -474,6 +925,138 @@ in
       (n: lib.nameValuePair "Mod+${toString n}" (lib.mkDefault "focus-workspace ${toString n}"))
       (lib.range 1 cfg.workspaceCount));
 
+    # ── The seams read through lib.probeFact, both gated on the option that expresses intent ──
+    #
+    # Neither seam probes unconditionally: see `layoutsProbe`/`monitorsProbe`/`sessionsProbe`
+    # above for why an always-on probe would misreport "nixdesktop.layouts was renamed" about a
+    # host that simply never named a `layout` (or a `session`) in the first place.
+    assertions =
+      lib.optionals (cfg.layout != null) (
+        [{
+          assertion = layoutsProbe.value ? ${cfg.layout};
+          message = ''
+            nixniri.niri.layout names "${cfg.layout}", which nixdesktop.layouts does not
+            declare (or nixdesktop.layouts is not composed on this host at all). Declared:
+            ${if layoutsProbe.value == { }
+              then "  (none)"
+              else lib.concatMapStringsSep "\n" (n: "  - ${n}") (lib.attrNames layoutsProbe.value)}
+          '';
+        }]
+        ++ lib.optionals (layoutsProbe.value ? ${cfg.layout}) (map
+          (o: {
+            assertion = o.match != "identity" || monitorsProbe.value ? ${o.monitor};
+            message = ''
+              nixniri.niri.layout "${cfg.layout}" addresses monitor "${o.monitor}" by
+              identity, but nixdesktop.monitors does not declare that slug (or
+              nixdesktop.monitors is not composed on this host at all). Without it there is
+              no "<make> <model> <serial>" triple to emit -- either compose
+              nixdesktop.monitors, or address this output by connector instead.
+            '';
+          })
+          layoutsProbe.value.${cfg.layout}.outputs)
+      )
+      ++ lib.optional (cfg.session != null) {
+        assertion = sessionsProbe.value ? ${cfg.session};
+        message = ''
+          nixniri.niri.session names "${cfg.session}", which nixdesktop.sessions does not
+          declare (or nixdesktop.sessions is not composed on this host at all). Declared:
+          ${if sessionsProbe.value == { }
+            then "  (none)"
+            else lib.concatMapStringsSep "\n" (n: "  - ${n}") (lib.attrNames sessionsProbe.value)}
+        '';
+      }
+
+      # ── device restriction is a security boundary: pin the niri VERSION, don't just warn ────
+      #
+      # niri's `debug` namespace is explicitly excluded from its own config stability policy
+      # (see the `session`/`package` options), so trusting that `render-drm-device`/
+      # `ignore-drm-device` still exist on whatever niri happens to be installed is exactly the
+      # silent-regression risk this whole mechanism exists to close. A real `package` is what
+      # lets this module ask instead of assume -- a warning alone (what this module used to
+      # ship) never stops a build, so an upgrade that drops both keys would still converge.
+      ++ lib.optional (cfg.session != null) {
+        assertion = cfg.package != null;
+        message = ''
+          nixniri.niri.session = "${toString cfg.session}" renders niri's
+          `debug { render-drm-device; ignore-drm-device; }` block. Both keys live under niri's
+          own `debug` namespace, which niri's documentation explicitly excludes from its config
+          breaking-change policy -- an upgrade can rename or remove either with no notice. Set
+          nixniri.niri.package to the real niri derivation this config will run under (e.g.
+          `pkgs.niri`) so this module can assert its version instead of silently trusting that a
+          future niri release still has these keys.
+        '';
+      }
+      ++ lib.optional (cfg.session != null && cfg.package != null) {
+        assertion = lib.versionAtLeast cfg.package.version minNiriDebugDeviceVersion;
+        message = ''
+          nixniri.niri.session = "${toString cfg.session}" needs niri >=
+          ${minNiriDebugDeviceVersion} -- `ignore-drm-device` (niri's own Configuration: Debug
+          Options wiki page: "Since: 25.11") is what this module's device denylist is built on,
+          and an older niri has no way to express one at all. nixniri.niri.package is niri
+          ${cfg.package.version}. Device restriction has no fallback here: there is no other way
+          to tell niri which DRM devices to leave alone.
+        '';
+      }
+
+      # ── every device this session names must resolve to a real, stable path ────────────────
+      #
+      # A name absent from nixgpu.stableDevicePaths.devices (or present with no `address`) is
+      # not survivable the way an unset `layout`/`session` is: it would either throw a raw,
+      # nixgpu-internal error the moment `devicePathFor` forces `cardPath` (see that option's own
+      # `readOnly` default in nixgpu), or -- worse, if this module caught that some other way --
+      # silently drop one line out of the `debug` block, exactly the "device leaks into niri's
+      # enumeration" failure this whole mechanism exists to prevent. Naming it here, precisely,
+      # beats either.
+      ++ lib.optionals (cfg.session != null && sessionsProbe.value ? ${cfg.session}) (
+        let
+          s = sessionsProbe.value.${cfg.session};
+          namedDevices = s.permittedDevices ++ s.deniedDevices;
+        in
+        map
+          (d: {
+            assertion = stableDevicePathsProbe.value ? ${d};
+            message = ''
+              nixniri.niri.session = "${cfg.session}" names device "${d}" (via
+              nixdesktop.sessions.${cfg.session}.permittedDevices/deniedDevices), which
+              nixgpu.stableDevicePaths.devices does not declare (or nixgpu.stableDevicePaths is
+              not composed on this host at all). Declared:
+              ${if stableDevicePathsProbe.value == { }
+                then "  (none)"
+                else lib.concatMapStringsSep "\n" (n: "  - ${n}") (lib.attrNames stableDevicePathsProbe.value)}
+              Every device a session may render with or must ignore has to resolve to a stable
+              /dev/dri/by-path/* entry at eval time -- there is no other moment niri's own
+              config.kdl can be given one.
+            '';
+          })
+          namedDevices
+        ++ map
+          (d: {
+            assertion = !(stableDevicePathsProbe.value ? ${d}) || stableDevicePathsProbe.value.${d}.address != null;
+            message = ''
+              nixniri.niri.session = "${cfg.session}" names device "${d}", but
+              nixgpu.stableDevicePaths.devices.${d} declares no `address`. `cardPath`/
+              `renderPath` are DERIVED from `address` alone (a PCI domain:bus:device.function or
+              platform device name) -- without it neither can be computed, and this module has
+              no stable path left to put in niri's `debug` block for it. Set
+              nixgpu.stableDevicePaths.devices.${d}.address on the GPU-bearing host.
+            '';
+          })
+          namedDevices
+      );
+
+    warnings =
+      lib.optionals (cfg.layout != null) (collectProbes [ layoutsProbe monitorsProbe ]).warnings
+      ++ lib.optionals (cfg.session != null) (collectProbes [ sessionsProbe stableDevicePathsProbe ]).warnings
+      ++ lib.optional (deviceDebugLines != [ ]) ''
+        nixniri.niri.session = "${toString cfg.session}" renders niri's
+        `debug { render-drm-device; ignore-drm-device; }` block, resolved to real
+        /dev/dri/by-path/* paths via nixgpu.stableDevicePaths.devices. Both keys live under
+        niri's own `debug` namespace, which niri's documentation explicitly excludes from its
+        config breaking-change policy -- an upgrade can rename or remove either with no notice.
+        This module ASSERTS nixniri.niri.package's version against the range it was verified
+        against (see the `package` option); re-verify that range after every niri upgrade.
+      '';
+
     xdg.configFile."niri/config.kdl".text = ''
       // Managed by home-manager (nixniri's home/niri.nix). Hand edits will be overwritten by
       // the next `home-manager switch` -- set options instead.
@@ -493,7 +1076,7 @@ in
           }
       }
 
-      ${outputSection}
+      ${outputsSection}
 
       layout {
           gaps 16
@@ -553,6 +1136,7 @@ in
 
           ${cfg.extraBinds}
       }
+      ${deviceDebugBlock}
 
       ${cfg.extraTopLevel}
     '';

@@ -39,6 +39,22 @@ to rename every `nixdesktop.niri.*` reference (including inside `binds`/`extraSt
 to `nixniri.niri.*`. Nothing else about the option surface changed in the move: every option,
 default, and description is otherwise identical to nixdesktop's copy.
 
+### Breaking change: `output` → `outputs` / `layout`
+
+`nixniri.niri.output` — a single raw-KDL string interpolated once for every monitor on every
+host — is **gone**, not deprecated. Nothing here could ever be asserted about it and no registry
+could key on it: a host moving a monitor to a different machine got a block that silently stopped
+applying, with no build-time signal anywhere. It is replaced by two structured, additive options:
+
+| Option | Shape | For |
+|---|---|---|
+| `nixniri.niri.outputs.<name>` | attrset of typed fields (`mode`, `scale`, `position`, `transform`, `modeline`, `enable`) | hand-authored, per-host, keyed by connector name or identity triple — the manual/escape path |
+| `nixniri.niri.layout` | a `nixdesktop.layouts.<name>` name | translated automatically from the shared monitor registry — portable between hosts, the main path on a host that composes nixdesktop |
+
+Both render into the same generated `output {}` blocks; a consumer naming neither gets niri's own
+auto-detection, exactly as `output = null` used to. A consumer migrating a hand-written `output`
+string moves its fields into one `nixniri.niri.outputs."<connector-or-identity>"` entry.
+
 ## Modules
 
 | Module | Class | Owns |
@@ -47,14 +63,19 @@ default, and description is otherwise identical to nixdesktop's copy.
 
 ## The cross-repo contracts
 
-This module reads two options from [nixdesktop][nixdesktop], both **defensively** — a host running
-niri with no nixdesktop module in scope sees the fallback, never an evaluation error. Neither
-requires a flake input on nixdesktop, and nothing needs hand-wiring:
+This module reads several options from [nixdesktop][nixdesktop] and [nixgpu][nixgpu], all
+**defensively** — a host running niri with none of these composed sees the fallback for each,
+never an evaluation error. None of them requires a flake input on nixdesktop or nixgpu (this
+repo's only flake inputs are `nixpkgs` and `nixhost` — see below), and nothing needs hand-wiring:
 
 | Read | Used for | Absent → |
 |---|---|---|
 | `nixdesktop.startup` | translated into `spawn-sh-at-startup` lines | empty list, nothing rendered |
 | `nixdesktop.session.idleAndLock.lockCommand` | the Super+Alt+L lock bind | falls back to `swaylock` |
+| `nixdesktop.layouts.<name>` (via `nixniri.niri.layout`) | translated into `output {}` blocks | build failure if named and unresolved; nothing rendered if never named |
+| `nixdesktop.monitors.<name>` (via a layout's identity-matched entries) | the `"<make> <model> <serial>"` triple + alias fan-out | build failure if the layout needs it and it is unresolved |
+| `nixdesktop.sessions.<name>` (via `nixniri.niri.session`) | `permittedDevices`/`deniedDevices` — device NAMES, not paths | build failure if named and unresolved; nothing rendered if never named |
+| `nixgpu.stableDevicePaths.devices.<name>` (via `nixniri.niri.session`) | resolving each device NAME above to a stable `/dev/dri/by-path/*` PATH — see "Device restriction", below | build failure if a named device does not resolve to one; nothing rendered if `session` is never named |
 
 ```nix
 {
@@ -66,6 +87,16 @@ requires a flake input on nixdesktop, and nothing needs hand-wiring:
   nixniri.niri = {
     enable = true;
     terminal = "kitty";
+
+    # THE MAIN PATH on a host that composes nixdesktop's monitor/layout registry — portable
+    # between hosts because it is keyed by shared identity, not hand-copied EDID text.
+    layout = "docked";
+
+    # Device restriction, translated from nixdesktop.sessions.<name> down to real
+    # /dev/dri/by-path/* paths via nixgpu.stableDevicePaths.devices — see below.
+    # REQUIRES `package` the moment it is set (see "Device restriction").
+    session = "devhome";
+    package = pkgs.niri;
   };
 
   nixdesktop.session = {
@@ -79,6 +110,46 @@ requires a flake input on nixdesktop, and nothing needs hand-wiring:
   };
 }
 ```
+
+### The `nixhost` flake input
+
+This repo's only flake inputs are `nixpkgs` and [nixhost][nixhost]. `nixhost` is not a sibling
+domain repo the way nixdesktop and nixgpu are — every read in the table above stays a *defensive*
+read of live `config`, exactly as `nixdesktop.startup`/`nixdesktop.session.idleAndLock` always
+were, needing no `imports` of nixdesktop or nixgpu and no flake input on either. What `nixhost`
+supplies is `lib.probeFact`/`lib.collectProbes` (`lib/facts.nix`) — the one MECHANISM every read
+above shares, and the fix for a defect class a bare `config.nixfoo.bar or fallback` cannot avoid:
+it cannot tell "nixfoo is not composed on this host at all" (legitimate, silent) apart from
+"nixfoo IS composed, but `bar` moved, was renamed, or was rejected by its own type" (a defect that
+hides exactly as silently). `probeFact` tells the two apart, warns (or, for the `session`/`layout`
+seams below, asserts) only on the second, and is closed over as a plain function argument in
+`flake.nix` — a consumer importing `homeManagerModules.niri` sees an ordinary module function and
+never needs to know `nixhost` exists.
+
+### Device restriction — real paths, not names, and why
+
+niri has no allowlist: it enumerates every DRM device on the seat unconditionally, so the only
+lever is `debug { ignore-drm-device; render-drm-device; }` — a DENYLIST, the complement of
+whatever `nixdesktop.sessions.<name>` permits, over the complete inventory nixgpu maintains. But
+niri reads `config.kdl` straight off disk, with **no launcher step** in between: unlike scroll's
+`WLR_DRM_DEVICES` (an environment variable a launcher can still resolve against live sysfs at
+process-start time), a bare device NAME sitting in niri's own config file matches no live device
+and enforces **nothing at all**, silently, while looking like a perfectly valid file. This module
+therefore resolves each name to a stable `/dev/dri/by-path/*` PATH — via
+`nixgpu.stableDevicePaths.devices.<name>.{cardPath,renderPath}` — at Nix EVAL time, and renders
+only the resolved path. `renderPath` is preferred where the device has one; `cardPath` is the
+correct (not merely a fallback) answer for one that never will (an evdi dock, an ASPEED/AST BMC
+framebuffer) — verified against niri's own real device-resolution code, which accepts either node
+type and looks up the sibling itself.
+
+Both `debug` keys live in niri's own `debug` namespace, which niri's documentation explicitly
+excludes from its config stability policy — a future niri release can rename or remove either
+with no notice. That is why `nixniri.niri.session` **requires** `nixniri.niri.package` (the real
+niri derivation this config will run under) the moment it is set: this module asserts
+`package.version` against the niri release its `debug` translation was verified against, so an
+incompatible niri upgrade fails the build instead of silently rendering a block niri no longer
+understands — device restriction is a security boundary, and a boundary that fails open, quietly,
+is not one.
 
 ### Idle and lock moved out, and why
 
@@ -125,6 +196,8 @@ surface will move as niri itself does; there are no compatibility shims at this 
 
 [nixdesktop]: https://github.com/julian-corbet/nixdesktop-corbet-ch
 [nixarch]: https://github.com/julian-corbet/nixarch-corbet-ch
+[nixgpu]: https://github.com/julian-corbet/nixgpu-corbet-ch
+[nixhost]: https://github.com/julian-corbet/nixhost-corbet-ch
 
 ## License
 

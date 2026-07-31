@@ -1,0 +1,258 @@
+# checks/output-accepted.nix — feed this module's own rendered config.kdl to the REAL niri
+# binary's own `niri validate`.
+#
+# WHY THIS EXISTS. Every check in checks/output-contract.nix evaluates Nix and inspects the
+# result, which can only prove the module renders what it INTENDED. It cannot prove niri AGREES --
+# and for a config generator that is the only question that matters in the end. This mirrors
+# nixscroll's checks/config-accepted.nix (same "run the real binary against this module's own
+# output" doctrine), with one simplification: unlike scroll's `--validate` (which exits 0 even
+# having rejected every directive, forcing a stderr grep), niri's own `validate` subcommand exits
+# NON-ZERO on a rejected config -- confirmed empirically against the real binary (26.04, 2026-07)
+# before writing this check -- so this one gates on the exit status directly.
+{ pkgs, niri, niriModule }:
+let
+  lib = pkgs.lib;
+
+  # Minimal stand-in for the home-manager surface the module writes into -- see
+  # checks/startup-contract.nix and checks/output-contract.nix for the same doctrine.
+  hmStub = { lib, ... }: {
+    options = {
+      xdg.configFile = lib.mkOption { type = lib.types.attrsOf lib.types.attrs; default = { }; };
+      home.packages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
+      home.file = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
+      systemd.user = lib.mkOption { type = lib.types.anything; default = { }; };
+      assertions = lib.mkOption { type = lib.types.listOf lib.types.unspecified; default = [ ]; };
+      warnings = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+    };
+  };
+
+  # Minimal stand-ins for nixdesktop's monitor/layout/session producers -- see
+  # checks/output-contract.nix for why these are narrow rather than a full nixdesktop reimport.
+  outputEntrySubmodule = lib.types.submodule {
+    options = {
+      monitor = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+      connector = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+      match = lib.mkOption { type = lib.types.enum [ "identity" "connector" ]; default = "identity"; };
+      enable = lib.mkOption { type = lib.types.bool; default = true; };
+      mode = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+      modeline = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+      scale = lib.mkOption { type = lib.types.nullOr lib.types.numbers.positive; default = null; };
+      position = lib.mkOption {
+        type = lib.types.nullOr (lib.types.submodule {
+          options = {
+            x = lib.mkOption { type = lib.types.int; };
+            y = lib.mkOption { type = lib.types.int; };
+          };
+        });
+        default = null;
+      };
+      transform = lib.mkOption {
+        type = lib.types.enum [ "normal" "90" "180" "270" "flipped" "flipped-90" "flipped-180" "flipped-270" ];
+        default = "normal";
+      };
+    };
+  };
+
+  layoutsFixture = { lib, ... }: {
+    options.nixdesktop.layouts = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options.outputs = lib.mkOption { type = lib.types.listOf outputEntrySubmodule; default = [ ]; };
+      });
+      default = { };
+    };
+    config.nixdesktop.layouts.docked.outputs = [
+      {
+        monitor = "u4323qe";
+        match = "identity";
+        mode = "3840x2160@60";
+        scale = 1.5;
+        position = { x = 0; y = 0; };
+        transform = "90";
+      }
+      {
+        connector = "eDP-1";
+        match = "connector";
+        enable = false;
+      }
+    ];
+  };
+
+  monitorsFixture = { lib, ... }: {
+    options.nixdesktop.monitors = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          identifier = lib.mkOption { type = lib.types.str; };
+          aliases = lib.mkOption {
+            type = lib.types.listOf (lib.types.submodule { options.identifier = lib.mkOption { type = lib.types.str; }; });
+            default = [ ];
+          };
+        };
+      });
+      default = { };
+    };
+    config.nixdesktop.monitors.u4323qe = {
+      identifier = "Dell Inc. DELL U4323QE 9BQR2P3";
+      aliases = [ { identifier = "Dell Inc. DELL U4323QE 9BQR2P3 ALT"; } ];
+    };
+  };
+
+  sessionsFixture = { lib, ... }: {
+    options.nixdesktop.sessions = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          permittedDevices = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+          deniedDevices = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
+        };
+      });
+      default = { };
+    };
+    config.nixdesktop.sessions.devhome = {
+      permittedDevices = [ "ast" ];
+      deniedDevices = [ "amd" "evdi" ];
+    };
+  };
+
+  # Minimal stand-in for nixgpu's `stableDevicePaths.devices` -- see checks/output-contract.nix
+  # for why this is narrow (just the three fields home/niri.nix's own `devicePathFor` reads)
+  # rather than a reimplementation of nixgpu's own schema. "ast" and "evdi" both have
+  # `renderPath = null` (a BMC framebuffer and a platform device never have one, by driver fact),
+  # proving the real niri binary below accepts a `debug` block built from card-only paths too;
+  # "amd" has both, proving the ordinary GPU case in the same real-binary pass.
+  stableDevicePathsFixture = { lib, ... }: {
+    options.nixgpu.stableDevicePaths.devices = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          address = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+          cardPath = lib.mkOption { type = lib.types.str; };
+          renderPath = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
+        };
+      });
+      default = { };
+    };
+    config.nixgpu.stableDevicePaths.devices = {
+      ast = {
+        address = "0000:00:02.0";
+        cardPath = "/dev/dri/by-path/pci-0000:00:02.0-card";
+        renderPath = null;
+      };
+      amd = {
+        address = "0000:0a:00.0";
+        cardPath = "/dev/dri/by-path/pci-0000:0a:00.0-card";
+        renderPath = "/dev/dri/by-path/pci-0000:0a:00.0-render";
+      };
+      evdi = {
+        address = "evdi.0";
+        cardPath = "/dev/dri/by-path/platform-evdi.0-card";
+        renderPath = null;
+      };
+    };
+  };
+
+  # One config exercising a broad spread of the option surface -- manual outputs (with a
+  # modeline, a scale, a position, a non-default transform), a translated layout (identity +
+  # alias + connector-off), a translated session (denylist + primary render device), the raw
+  # escape hatch, and an ordinary keybind alongside all of it -- not a minimal smoke test. Same
+  # doctrine as nixscroll's config-accepted.nix fixture: an option absent from this fixture is an
+  # option no one has ever asked niri about.
+  fixture = {
+    nixniri.niri.enable = true;
+    nixniri.niri.layout = "docked";
+    nixniri.niri.session = "devhome";
+    # The REAL niri package this check already validates against (see `nativeBuildInputs`
+    # below) -- closing the loop: the version this module's assertion checks is the exact
+    # binary `niri validate` runs a few lines down, not a stand-in.
+    nixniri.niri.package = niri;
+    nixniri.niri.outputs."DP-2" = {
+      mode = "1920x1080@60";
+      modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
+      scale = 1.0;
+      position = {
+        x = 3840;
+        y = 0;
+      };
+      transform = "flipped";
+    };
+    nixniri.niri.extraOutputs = ''
+      output "HDMI-A-2" {
+          off
+      }
+    '';
+    nixniri.niri.binds."Mod+Y" = ''spawn "true"'';
+  };
+
+  evaluated = (lib.evalModules {
+    modules = [ hmStub niriModule layoutsFixture monitorsFixture sessionsFixture stableDevicePathsFixture fixture ];
+    specialArgs = { inherit pkgs; };
+  }).config;
+
+  rendered = evaluated.xdg.configFile."niri/config.kdl".text;
+
+  # FORCED here, at Nix eval time, before this derivation is even built -- an assertion that
+  # fired would mean this whole check is asking the real niri binary about a config nixniri
+  # itself does not believe is valid, which is a strictly less useful thing to have proven.
+  # `assert` throws with the *first* failing message, which is enough to find the rest from.
+  failedAssertion = lib.findFirst (a: !a.assertion) null evaluated.assertions;
+  rendered' =
+    assert (failedAssertion == null || throw "nixniri: this check's own fixture fails an assertion: ${failedAssertion.message}");
+    rendered;
+
+  # The one thing every check in checks/output-contract.nix cannot prove: this file evaluates
+  # Nix, not niri, so a rendered config asserting the right THINGS could still contain the wrong
+  # STRINGS. Forced here rather than left to the real-binary check below, so a regression back to
+  # bare device names is a clear, named Nix-level failure instead of an opaque "niri rejected the
+  # config" from a validator that has no way to say WHY the directive is wrong -- niri's own
+  # parser accepts a bare name as a syntactically valid (if useless) string argument.
+  rendered'' =
+    assert (lib.hasInfix "/dev/dri/by-path/" rendered'
+      || throw "nixniri: the rendered debug block contains no /dev/dri/by-path/* path -- device restriction regressed back to bare names.");
+    rendered';
+
+  configFile = pkgs.writeText "niri-fixture-config.kdl" rendered'';
+
+  # A config that MUST be rejected -- this check's own self-test, same shape as nixscroll's
+  # `poison` fixture in checks/config-accepted.nix.
+  poison = pkgs.writeText "niri-poison.kdl" ''
+    bogus-directive-niri-cannot-know true
+  '';
+in
+pkgs.runCommand "niri-output-accepted"
+{
+  nativeBuildInputs = [ niri ];
+  inherit configFile poison;
+}
+  ''
+    set +e
+
+    # ── SELF-TEST FIRST ────────────────────────────────────────────────────────────────────────
+    # Prove the validator actually parses configs in THIS sandbox before believing anything it
+    # says about ours -- a green result from a validator that never ran is precisely the failure
+    # this check exists to catch, and it is not entitled to exempt itself from it.
+    niri validate -c "$poison" > poison.log 2>&1
+    poisonExit=$?
+    echo "== poison config (must be REJECTED) =="
+    cat poison.log
+    if [ "$poisonExit" -eq 0 ]; then
+      echo "FAIL: the self-test config was NOT rejected, so niri never parsed it here."
+      echo "This check cannot report anything about the real config until that is fixed."
+      exit 1
+    fi
+    echo "self-test OK: niri rejects a known-bad directive in this environment."
+    echo
+
+    # ── THE ACTUAL CHECK ───────────────────────────────────────────────────────────────────────
+    echo "== validating the rendered config against $(niri --version) =="
+    cat "$configFile"
+    niri validate -c "$configFile" > out.log 2>&1
+    goodExit=$?
+    cat out.log
+    if [ "$goodExit" -ne 0 ]; then
+      echo
+      echo "FAIL: niri rejected the config nixniri's structured outputs/layout/session"
+      echo "translator generated. The parse error above names the line; either the option"
+      echo "should not exist, or it renders the wrong spelling."
+      exit 1
+    fi
+
+    echo "OK: niri accepts the rendered config."
+    touch $out
+  ''
