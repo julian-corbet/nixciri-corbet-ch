@@ -557,7 +557,7 @@ in
     session = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      example = "devhome";
+      example = "primary";
       description = ''
         A `nixdesktop.sessions.<name>` whose resolved `permittedDevices`/`deniedDevices`
         becomes this niri instance's device restriction, read through `lib.probeFact`. niri has

@@ -113,7 +113,7 @@ let
       default = { };
     };
     config.nixdesktop.sessions = {
-      devhome = {
+      primary = {
         permittedDevices = [ "ast" ];
         deniedDevices = [ "amd" "evdi" ];
       };
@@ -240,8 +240,8 @@ let
   layoutRendered = render [ base layoutsFixture monitorsFixture { nixniri.niri.layout = "docked"; } ];
 
   # ── session translation: denylist + primary render device, resolved to REAL stable paths ──────
-  sessionRendered = render [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "devhome"; } ];
-  sessionWarnings = warningsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "devhome"; } ];
+  sessionRendered = render [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
+  sessionWarnings = warningsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
 
   # ── fact-wiring: an unresolvable name is a hard failure, never a silent no-op ─────────────────
   unknownLayoutAssertions = assertionsOf [ base layoutsFixture { nixniri.niri.layout = "nonexistent"; } ];
@@ -249,14 +249,14 @@ let
 
   # ── fact-wiring: the niri-version gate on the volatile `debug` namespace ───────────────────────
   packageMissingAssertions =
-    assertionsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "devhome"; } ];
+    assertionsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
   packageTooOldAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "devhome"; nixniri.niri.package = fakeNiriPackage "24.01"; }
+    { nixniri.niri.session = "primary"; nixniri.niri.package = fakeNiriPackage "24.01"; }
   ];
   packageOkAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "devhome"; nixniri.niri.package = fakeNiriPackage "26.04"; }
+    { nixniri.niri.session = "primary"; nixniri.niri.package = fakeNiriPackage "26.04"; }
   ];
 
   # ── fact-wiring: a device name that cannot resolve to a stable path is a hard failure too ─────

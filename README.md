@@ -103,7 +103,7 @@ repo's only flake inputs are `nixpkgs` and `nixhost` — see below), and nothing
     # Device restriction, translated from nixdesktop.sessions.<name> down to real
     # /dev/dri/by-path/* paths via nixgpu.stableDevicePaths.devices — see below.
     # REQUIRES `package` the moment it is set (see "Device restriction").
-    session = "devhome";
+    session = "primary";
     package = pkgs.niri;
   };
 

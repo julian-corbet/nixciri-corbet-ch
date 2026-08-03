@@ -106,7 +106,7 @@ let
       });
       default = { };
     };
-    config.nixdesktop.sessions.devhome = {
+    config.nixdesktop.sessions.primary = {
       permittedDevices = [ "ast" ];
       deniedDevices = [ "amd" "evdi" ];
     };
@@ -157,7 +157,7 @@ let
   fixture = {
     nixniri.niri.enable = true;
     nixniri.niri.layout = "docked";
-    nixniri.niri.session = "devhome";
+    nixniri.niri.session = "primary";
     # The REAL niri package this check already validates against (see `nativeBuildInputs`
     # below) -- closing the loop: the version this module's assertion checks is the exact
     # binary `niri validate` runs a few lines down, not a stand-in.
