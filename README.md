@@ -1,5 +1,13 @@
 # nixniri
 
+> **DEPRECATED (2026-08-02).** niri is retired on every host that used to run it — the fleet
+> moved to [nixscroll](https://github.com/julian-corbet/nixscroll-corbet-ch) (a sway/wlroots
+> fork with the same scrolling/PaperWM layout model) fleet-wide after a head-to-head VRAM
+> comparison found the two within noise of each other, closing the last reason to run two
+> compositors across the estate. This repo still works and remains published (niri itself is a
+> fine compositor), but it is no longer consumed by any host in production and should not be
+> proposed for new work here — use nixscroll instead.
+
 A declarative [niri](https://github.com/YaLTeR/niri) compositor config, as a single
 home-manager module. It generates `~/.config/niri/config.kdl` — input, layout, workspaces,
 keybinds, startup — from structured Nix options instead of hand-edited KDL,
