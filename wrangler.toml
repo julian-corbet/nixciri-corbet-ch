@@ -1,4 +1,4 @@
-name = "nixniri"
+name = "nixciri"
 compatibility_date = "2026-07-28"
 
 # Static project page — Cloudflare Worker static assets (same shape as the
@@ -8,5 +8,5 @@ directory = "./site"
 html_handling = "auto-trailing-slash"
 
 [[routes]]
-pattern = "nixniri.corbet.ch"
+pattern = "nixciri.corbet.ch"
 custom_domain = true

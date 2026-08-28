@@ -4,16 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  <title>nixniri &mdash; Declarative niri compositor config, generated from structured Nix options</title>
-  <meta name="description" content="nixniri is a home-manager module that generates ~/.config/niri/config.kdl — input, layout, workspaces, keybinds, idle/lock timing, startup — from structured Nix options instead of hand-edited KDL. Extracted out of nixdesktop so nixdesktop's shared policy and session layer can become compositor-neutral. Pre-alpha, real code moving to a new address.">
-
+  <title>nixciri &mdash; Declarative Ciri compositor integration</title>
+  <meta name="description" content="nixciri translates neutral desktop contracts into Ciri's config grammar without shipping personal desktop policy.">
   <meta name="theme-color" content="#0b1120" media="(prefers-color-scheme: dark)">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 
-  <meta property="og:title" content="nixniri">
-  <meta property="og:description" content="Declarative niri compositor config, generated from structured Nix options instead of hand-edited KDL. Extracted out of nixdesktop so the shared policy layer can support more than one compositor.">
+  <meta property="og:title" content="nixciri">
+  <meta property="og:description" content="Declarative Ciri compositor integration for Home Manager.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://nixniri.corbet.ch">
+  <meta property="og:url" content="https://nixciri.corbet.ch">
 
   <link rel="stylesheet" href="https://v1.foss.design.corbet.ch/assets/base.css">
   <link rel="stylesheet" href="./theme.css">
@@ -22,337 +21,150 @@
 
 <header class="hero">
   <nav>
-    <a href="/" class="nav-brand">nixniri</a>
+    <a href="/" class="nav-brand">nixciri</a>
     <div class="nav-links">
-      <a href="https://github.com/julian-corbet/nixniri-corbet-ch">GitHub</a>
+      <a href="#boundary">Boundary</a>
+      <a href="#contracts">Contracts</a>
       <a href="#status">Status</a>
-      <a href="#roadmap">Roadmap</a>
-      <details class="nav-family">
-        <summary>nix* family</summary>
-        <nav class="nav-family-panel" aria-label="The nix* project family">
-          <a href="https://nixapps.corbet.ch">nixapps <span>cluster apps as typed Nix</span></a>
-          <a href="https://nixarch.corbet.ch">nixarch <span>Arch's AUR breadth, Nix's declarative config</span></a>
-          <a href="https://nixbackup.corbet.ch">nixbackup <span>verify the backup, not the exit code</span></a>
-          <a href="https://nixgpu.corbet.ch">nixgpu <span>share one GPU by priority</span></a>
-          <a href="https://nixk3s.corbet.ch">nixk3s <span>the host is a flake, the cluster is git</span></a>
-          <a href="https://nixllm.corbet.ch">nixllm <span>the model store IS the registry</span></a>
-          <a href="https://nixnas.corbet.ch">nixnas <span>declarative NAS on a USB stick</span></a>
-          <a href="https://nixnet.corbet.ch">nixnet <span>the best live path to a host</span></a>
-          <a href="https://nixniri.corbet.ch" aria-current="page">nixniri <span>the KDL file you stopped hand-editing</span></a>
-          <a href="https://nixpush.corbet.ch">nixpush <span>one send call, any notification backend</span></a>
-          <a href="https://nixram.corbet.ch">nixram <span>RAM tuning that fits your machine</span></a>
-          <a href="https://nixremote.corbet.ch">nixremote <span>remote apps as real windows</span></a>
-          <a href="https://nixscroll.corbet.ch">nixscroll <span>a scrolling column of windows, declared</span></a>
-          <a href="https://nixsh.corbet.ch">nixsh <span>every shell on every machine, declared</span></a>
-          <a href="https://nixshare.corbet.ch">nixshare <span>NFS/CIFS shares that unstick themselves</span></a>
-          <a href="https://nixvibe.corbet.ch">nixvibe <span>a coding agent in a browser terminal</span></a>
-          <a href="https://nixvps.corbet.ch">nixvps <span>NixOS on sub-1GB VPSes</span></a>
-        </nav>
-      </details>
+      <a href="https://github.com/julian-corbet/nixciri-corbet-ch">GitHub</a>
     </div>
   </nav>
 
   <div class="hero-content">
-    <h1>nixniri</h1>
-    <p class="tagline">niri's own config file &mdash; generated, not hand-edited.</p>
+    <h1>nixciri</h1>
+    <p class="tagline">Ciri's config grammar, generated from neutral desktop intent.</p>
     <p class="subtitle">
-      A home-manager module that turns structured Nix options into a real
-      <code>~/.config/niri/config.kdl</code>: input devices, layout,
-      workspaces, column widths, keybinds (add, override, or remove any
-      one of them), idle/lock timing, and startup. No hand-maintained KDL
-      block, and no drift between two machines that are supposed to run
-      the identical session.
+      A Home Manager module that writes <code>~/.config/ciri/config.kdl</code>,
+      translates shared display and session contracts, and leaves personal
+      bindings, colors, rules, and desktop components to the consumer.
     </p>
     <div class="cta">
-      <a href="#status" class="btn btn-primary">Read the Status</a>
-      <a href="https://github.com/julian-corbet/nixniri-corbet-ch" class="btn btn-secondary">View on GitHub</a>
+      <a href="#boundary" class="btn btn-primary">See the boundary</a>
+      <a href="https://github.com/julian-corbet/nixciri-corbet-ch" class="btn btn-secondary">View source</a>
     </div>
   </div>
 </header>
 
 <main>
-
-<section id="status" class="how-it-works">
-  <div class="container">
-    <h2>Status: pre-alpha, real code moving to a new address</h2>
-    <div class="steps">
-      <div class="step">
-        <div class="step-num">&check;</div>
-        <h3>Not new code &mdash; a new home for existing code</h3>
-        <p>
-          Every option on this page is the same module that has been
-          generating a real <code>~/.config/niri/config.kdl</code> as
-          <code>nixdesktop</code>'s own <code>home/niri.nix</code>:
-          the keybind attrset with its add/override/remove semantics,
-          the per-workspace binds generated from <code>workspaceCount</code>,
-          the idle/lock command assembly. It's moving out of
-          <code>nixdesktop</code>, not being written from a blank file.
-        </p>
-      </div>
-      <div class="step">
-        <div class="step-num">!</div>
-        <h3>What the move hasn't proven yet</h3>
-        <p>
-          All of that was written, revised, and fixed while living
-          inside <code>nixdesktop</code>'s own flake. It has not yet been
-          evaluated as <em>this</em> repo's own standalone flake output,
-          on a config that imports <code>nixniri</code> without also
-          pulling in <code>nixdesktop</code>. <code>nixdesktop</code>
-          itself hasn't been cut over to import this repo instead of its
-          own copy yet either &mdash; that migration is separate, tracked
-          work, not something this page's existence implies is finished.
-        </p>
-      </div>
-      <div class="step">
-        <div class="step-num">!</div>
-        <h3>No test suite</h3>
-        <p>
-          Real, working, hand-verified inside its previous home &mdash;
-          not covered by an automated suite yet, here or there. The
-          binds override/remove semantics in particular are exercised by
-          hand, not by a regression test.
-        </p>
+  <section id="boundary" class="features">
+    <div class="container">
+      <h2>One compositor, three owners</h2>
+      <div class="feature-grid">
+        <div class="feature">
+          <h3>ciri</h3>
+          <p>
+            The runtime product: compositor source, renderer and protocol fixes,
+            command-line interface, and runtime identity.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>nixciri</h3>
+          <p>
+            The public integration: KDL serialization and translation from
+            neutral display, startup, session, and device contracts.
+          </p>
+        </div>
+        <div class="feature">
+          <h3>ciri.nix</h3>
+          <p>
+            Private values: selected layouts, key bindings, colors, gaps,
+            application rules, and host overrides.
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="features">
-  <div class="container">
-    <h2>What it generates</h2>
-    <div class="feature-grid">
-      <div class="feature">
-        <h3>Keybinds: add, override, remove</h3>
-        <p>
-          <code>niri.binds</code> is an attrset keyed by the exact niri
-          key-combo string. Define a new key to add a bind, redefine a
-          shipped key to override it (whole value &mdash; action, title,
-          and flags together), or redefine it as <code>null</code> to
-          remove it outright. Every bind niri's own upstream example
-          config ships (Mod+arrows, Mod+1-9, the standard media keys)
-          lives here as a real, individually overridable default.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Workspaces &amp; column widths</h3>
-        <p>
-          <code>workspaceCount</code> generates that many named, always
-          -present workspaces; <code>presetColumnWidths</code> controls
-          what Mod+R cycles through. Niri's own thirds/half/two-thirds
-          default, or your own list.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Idle &amp; lock, computed &mdash; not spawned</h3>
-        <p>
-          <code>idle.lockAfterSeconds</code> /
-          <code>idle.suspendAfterSeconds</code> assemble a read-only
-          <code>idle.command</code>: the full <code>swayidle</code>
-          invocation, ready to hand to a systemd user service. Not
-          spawned by this module itself &mdash; niri has no way to
-          restart a <code>spawn-at-startup</code> line when a running
-          session's config changes, so a real idle daemon needs to be a
-          service, not a startup line. See "The cross-repo contract"
-          below.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Escape hatches, not a wall</h3>
-        <p>
-          <code>extraStartup</code>, <code>extraWindowRules</code>,
-          <code>extraBinds</code>, and <code>extraTopLevel</code> accept
-          raw KDL, verbatim, for anything the structured options don't
-          model yet. Structure for the common case; an escape hatch for
-          everything else.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Installs nothing</h3>
-        <p>
-          This module never names a package or an absolute binary path
-          &mdash; not for <code>niri</code> itself, not for
-          <code>terminal</code>/<code>launcher</code>/<code>lockCommand</code>/<code>osd</code>.
-          Package names and binary paths aren't portable (<code>thunar</code>
-          on Arch is <code>xfce.thunar</code> in nixpkgs); resolving them
-          is a platform backend's job &mdash; <a href="https://github.com/julian-corbet/nixarch-corbet-ch">nixarch</a>
-          for Arch/CachyOS, or plain NixOS <code>environment.systemPackages</code>.
-        </p>
-      </div>
-      <div class="feature">
-        <h3>Compositor-neutral policy stays upstream</h3>
-        <p>
-          <a href="https://github.com/julian-corbet/nixdesktop-corbet-ch">nixdesktop</a>
-          keeps the platform-neutral role policy (which desktop roles a
-          session wants filled) and the compositor-agnostic chrome
-          &mdash; waybar, mako, swaylock, nwg-bar, eww, the idle/lock
-          systemd service. This repo owns exactly one thing: niri's own
-          config file.
-        </p>
+  <section id="contracts" class="architecture">
+    <div class="container">
+      <h2>What the module translates</h2>
+      <div class="arch-details">
+        <div class="arch-detail">
+          <h3>Displays</h3>
+          <p>
+            <code>nixdisplay.layouts</code> and <code>nixdisplay.monitors</code>
+            become typed output blocks, including identity aliases, transforms,
+            positions, scales, modes, and modelines.
+          </p>
+        </div>
+        <div class="arch-detail">
+          <h3>Session devices</h3>
+          <p>
+            Neutral session device names are resolved through stable GPU paths
+            before Ciri's render-device and denylist directives are written.
+          </p>
+        </div>
+        <div class="arch-detail">
+          <h3>Startup</h3>
+          <p>
+            Generic <code>nixdesktop.startup</code> command strings become
+            shell-aware startup directives. The module invents no components.
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section id="install" class="install">
-  <div class="container">
-    <h2>Get started</h2>
-    <div class="install-grid">
-      <div class="install-method">
-        <h3>1. Add the flake input</h3>
-        <pre><code>inputs.nixniri.url = "github:julian-corbet/nixniri-corbet-ch";</code></pre>
-      </div>
-      <div class="install-method">
-        <h3>2. Import and configure</h3>
-        <pre><code>imports = [ inputs.nixniri.homeManagerModules.niri ];
-
-nixniri.niri = {
+  <section class="install">
+    <div class="container">
+      <h2>Public surface</h2>
+      <div class="install-grid">
+        <div class="install-method">
+          <h3>Import</h3>
+          <pre><code>imports = [ inputs.nixciri.homeManagerModules.ciri ];</code></pre>
+        </div>
+        <div class="install-method">
+          <h3>Configure</h3>
+          <pre><code>programs.ciri = {
   enable = true;
-  terminal = "kitty";
-  binds."Mod+T".hotkeyOverlayTitle = "Open a Terminal";
-  binds."Print" = null; # remove the shipped screenshot bind
+  layout = "docked";
+  session = "primary";
+  package = ciriPackage;
 };</code></pre>
-      </div>
-      <div class="install-method">
-        <h3>3. Renamed from nixdesktop &mdash; no shim</h3>
-        <p>
-          The option namespace moved from <code>nixdesktop.niri.*</code>
-          to <code>nixniri.niri.*</code>, matching this family's own
-          convention (the top-level attribute is always the repo's own
-          name). Migrating from nixdesktop's old copy means renaming
-          every reference, including inside <code>binds</code>/<code>extraStartup</code>
-          overrides. No compatibility alias exists at this stage.
-        </p>
+        </div>
+        <div class="install-method">
+          <h3>Clean API</h3>
+          <p>
+            The module is exported as <code>homeManagerModules.ciri</code>, uses
+            <code>programs.ciri.*</code>, and writes only the Ciri config path.
+            No compatibility aliases are provided.
+          </p>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="architecture">
-  <div class="container">
-    <h2>Where this fits</h2>
-    <div class="arch-details">
-      <div class="arch-detail">
-        <h3>1. Compositor config &mdash; nixniri / nixscroll</h3>
-        <p>
-          Generates the compositor's own config file. Nothing else.
-          Doesn't know or care what bar you run, what notification
-          daemon you have, or what a "role" is.
-        </p>
-      </div>
-      <div class="arch-detail">
-        <h3>2. Policy + shared chrome &mdash; nixdesktop</h3>
-        <p>
-          Which roles a session wants filled (file manager, polkit
-          agent, notification daemon, bar), plus the compositor-agnostic
-          pieces: waybar, mako, swaylock, nwg-bar, eww, and the idle/lock
-          systemd service. Imports whichever compositor layer(s) a
-          machine actually uses.
-        </p>
-      </div>
-      <div class="arch-detail">
-        <h3>3. The hub</h3>
-        <p>
-          An actual machine's own config, importing nixdesktop plus
-          exactly one compositor layer, resolved into real installed
-          packages by a platform backend such as nixarch.
-        </p>
+  <section id="status" class="how-it-works">
+    <div class="container">
+      <h2>Status: source preparation</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">&check;</div>
+          <h3>Config serializer retained</h3>
+          <p>Structured outputs, binds, modelines, transforms, aliases, and device paths remain covered.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">&check;</div>
+          <h3>Private policy removed</h3>
+          <p>The public module ships no bindings, colors, gaps, rules, workspace count, or desktop components.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">!</div>
+          <h3>Not activated</h3>
+          <p>Runtime packaging, compositor registration, portal integration, and a deliberate canary remain separate work.</p>
+        </div>
       </div>
     </div>
-  </div>
-</section>
-
-<section class="commands">
-  <div class="container">
-    <h2>The cross-repo contract: <code>idle.command</code></h2>
-    <p>
-      The one real API surface the split creates. Neither repo wires the
-      idle daemon together implicitly anymore &mdash; that was only true
-      when both lived in one file. The consumer connects them explicitly:
-    </p>
-    <div class="table-scroll">
-      <pre><code>imports = [
-  inputs.nixniri.homeManagerModules.niri
-  inputs.nixdesktop.homeManagerModules.session
-];
-
-nixniri.niri = {
-  enable = true;
-  idle.lockAfterSeconds = 300;
-  idle.suspendAfterSeconds = 600;
-  lockCommand = "swaylock";
-};
-
-nixdesktop.session.idleAndLock = {
-  enable = true;
-  # nixniri assembles the command; nixdesktop's session layer runs it.
-  command = config.nixniri.niri.idle.command;
-};</code></pre>
-    </div>
-    <p>
-      A consumer who only wants niri's own config file &mdash; no bar, no
-      notification daemon, no systemd session layer &mdash; imports
-      <code>nixniri.homeManagerModules.niri</code> alone and ignores
-      <code>idle.command</code> entirely; the <code>lockCommand</code>-bound
-      keybind still works without an idle daemon running.
-    </p>
-  </div>
-</section>
-
-<section id="roadmap" class="architecture">
-  <div class="container">
-    <h2>Roadmap (planned, not yet built)</h2>
-    <div class="arch-details">
-      <div class="arch-detail">
-        <h3>Cut nixdesktop over</h3>
-        <p>
-          nixdesktop's own <code>flake.nix</code> still exports its
-          original <code>home/niri.nix</code> directly. Pointing it at
-          this repo instead &mdash; and deleting its own copy &mdash; is
-          separate, tracked work this page's existence doesn't imply is
-          finished.
-        </p>
-      </div>
-      <div class="arch-detail">
-        <h3>A NixOS-module mirror</h3>
-        <p>
-          For parity with how sibling projects export both layers, if a
-          system-level piece of this ever turns out to be needed &mdash;
-          nothing here currently requires root.
-        </p>
-      </div>
-      <div class="arch-detail">
-        <h3>Integration tests</h3>
-        <p>
-          Exercising the binds add/override/remove semantics and the
-          <code>idle.command</code> assembly directly, not just eval-time
-          type checks.
-        </p>
-      </div>
-      <div class="arch-detail">
-        <h3>Standalone evaluation, proven</h3>
-        <p>
-          A real build of a config that imports only <code>nixniri</code>
-          &mdash; no <code>nixdesktop</code> alongside it &mdash; to
-          confirm the split actually holds and not just typechecks.
-        </p>
-      </div>
-    </div>
-  </div>
-</section>
-
+  </section>
 </main>
 
 <footer>
   <div class="container">
     <div class="footer-links">
-      <a href="https://github.com/julian-corbet/nixniri-corbet-ch">Source</a>
-      <a href="https://github.com/julian-corbet/nixniri-corbet-ch/issues">Issues</a>
+      <a href="https://github.com/julian-corbet/nixciri-corbet-ch">Source</a>
+      <a href="https://github.com/julian-corbet/nixciri-corbet-ch/issues">Issues</a>
     </div>
-    <p>
-      <a href="https://github.com/julian-corbet/nixniri-corbet-ch/blob/main/LICENSE">MIT</a> &middot;
-      <a href="https://github.com/julian-corbet">Julian Corbet</a> &middot;
-      Built on <a href="https://github.com/YaLTeR/niri">niri</a>
-    </p>
+    <p><a href="https://github.com/julian-corbet/nixciri-corbet-ch/blob/main/LICENSE">MIT</a></p>
   </div>
 </footer>
 

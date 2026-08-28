@@ -1,17 +1,18 @@
-# checks/output-accepted.nix — feed this module's own rendered config.kdl to the REAL niri
-# binary's own `niri validate`.
+# checks/output-accepted.nix — feed this module's rendered config.kdl to the upstream Niri
+# validator whose grammar Ciri currently inherits.
 #
 # WHY THIS EXISTS. Every check in checks/output-contract.nix evaluates Nix and inspects the
-# result, which can only prove the module renders what it INTENDED. It cannot prove niri AGREES --
+# result, which can only prove the module renders what it intended. It cannot prove the parser agrees --
 # and for a config generator that is the only question that matters in the end. This mirrors
 # nixscroll's checks/config-accepted.nix (same "run the real binary against this module's own
 # output" doctrine), with one simplification: unlike scroll's `--validate` (which exits 0 even
-# having rejected every directive, forcing a stderr grep), niri's own `validate` subcommand exits
+# having rejected every directive, forcing a stderr grep), the upstream `validate` subcommand exits
 # NON-ZERO on a rejected config -- confirmed empirically against the real binary (26.04, 2026-07)
 # before writing this check -- so this one gates on the exit status directly.
-{ pkgs, niri, niriModule }:
+{ pkgs, upstreamValidator, ciriModule }:
 let
   lib = pkgs.lib;
+  validator = lib.getExe upstreamValidator;
 
   # Minimal stand-in for the home-manager surface the module writes into -- see
   # checks/startup-contract.nix and checks/output-contract.nix for the same doctrine.
@@ -26,8 +27,7 @@ let
     };
   };
 
-  # Minimal stand-ins for nixdesktop's monitor/layout/session producers -- see
-  # checks/output-contract.nix for why these are narrow rather than a full nixdesktop reimport.
+  # Minimal stand-ins for nixdisplay's monitor/layout producers and nixdesktop's session producer.
   outputEntrySubmodule = lib.types.submodule {
     options = {
       monitor = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; };
@@ -54,13 +54,13 @@ let
   };
 
   layoutsFixture = { lib, ... }: {
-    options.nixdesktop.layouts = lib.mkOption {
+    options.nixdisplay.layouts = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options.outputs = lib.mkOption { type = lib.types.listOf outputEntrySubmodule; default = [ ]; };
       });
       default = { };
     };
-    config.nixdesktop.layouts.docked.outputs = [
+    config.nixdisplay.layouts.docked.outputs = [
       {
         monitor = "u4323qe";
         match = "identity";
@@ -78,7 +78,7 @@ let
   };
 
   monitorsFixture = { lib, ... }: {
-    options.nixdesktop.monitors = lib.mkOption {
+    options.nixdisplay.monitors = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options = {
           identifier = lib.mkOption { type = lib.types.str; };
@@ -90,7 +90,7 @@ let
       });
       default = { };
     };
-    config.nixdesktop.monitors.u4323qe = {
+    config.nixdisplay.monitors.u4323qe = {
       identifier = "Dell Inc. DELL U4323QE 9BQR2P3";
       aliases = [ { identifier = "Dell Inc. DELL U4323QE 9BQR2P3 ALT"; } ];
     };
@@ -113,10 +113,10 @@ let
   };
 
   # Minimal stand-in for nixgpu's `stableDevicePaths.devices` -- see checks/output-contract.nix
-  # for why this is narrow (just the three fields home/niri.nix's own `devicePathFor` reads)
+  # for why this is narrow (just the three fields home/ciri.nix's own `devicePathFor` reads)
   # rather than a reimplementation of nixgpu's own schema. "ast" and "evdi" both have
   # `renderPath = null` (a BMC framebuffer and a platform device never have one, by driver fact),
-  # proving the real niri binary below accepts a `debug` block built from card-only paths too;
+  # proving the real parser below accepts a `debug` block built from card-only paths too;
   # "amd" has both, proving the ordinary GPU case in the same real-binary pass.
   stableDevicePathsFixture = { lib, ... }: {
     options.nixgpu.stableDevicePaths.devices = lib.mkOption {
@@ -153,16 +153,14 @@ let
   # alias + connector-off), a translated session (denylist + primary render device), the raw
   # escape hatch, and an ordinary keybind alongside all of it -- not a minimal smoke test. Same
   # doctrine as nixscroll's config-accepted.nix fixture: an option absent from this fixture is an
-  # option no one has ever asked niri about.
+  # option no one has ever asked the parser about.
   fixture = {
-    nixniri.niri.enable = true;
-    nixniri.niri.layout = "docked";
-    nixniri.niri.session = "primary";
-    # The REAL niri package this check already validates against (see `nativeBuildInputs`
-    # below) -- closing the loop: the version this module's assertion checks is the exact
-    # binary `niri validate` runs a few lines down, not a stand-in.
-    nixniri.niri.package = niri;
-    nixniri.niri.outputs."DP-2" = {
+    programs.ciri.enable = true;
+    programs.ciri.layout = "docked";
+    programs.ciri.session = "primary";
+    # This is the exact package whose validator runs below, not a version stand-in.
+    programs.ciri.package = upstreamValidator;
+    programs.ciri.outputs."DP-2" = {
       mode = "1920x1080@60";
       modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
       scale = 1.0;
@@ -172,53 +170,51 @@ let
       };
       transform = "flipped";
     };
-    nixniri.niri.extraOutputs = ''
+    programs.ciri.extraOutputs = ''
       output "HDMI-A-2" {
           off
       }
     '';
-    nixniri.niri.binds."Mod+Y" = ''spawn "true"'';
+    programs.ciri.binds."Mod+Y" = ''spawn "true"'';
   };
 
   evaluated = (lib.evalModules {
-    modules = [ hmStub niriModule layoutsFixture monitorsFixture sessionsFixture stableDevicePathsFixture fixture ];
+    modules = [ hmStub ciriModule layoutsFixture monitorsFixture sessionsFixture stableDevicePathsFixture fixture ];
     specialArgs = { inherit pkgs; };
   }).config;
 
-  rendered = evaluated.xdg.configFile."niri/config.kdl".text;
+  rendered = evaluated.xdg.configFile."ciri/config.kdl".text;
 
   # FORCED here, at Nix eval time, before this derivation is even built -- an assertion that
-  # fired would mean this whole check is asking the real niri binary about a config nixniri
+  # fired would mean this whole check is asking the real parser about a config nixciri
   # itself does not believe is valid, which is a strictly less useful thing to have proven.
   # `assert` throws with the *first* failing message, which is enough to find the rest from.
   failedAssertion = lib.findFirst (a: !a.assertion) null evaluated.assertions;
   rendered' =
-    assert (failedAssertion == null || throw "nixniri: this check's own fixture fails an assertion: ${failedAssertion.message}");
+    assert (failedAssertion == null || throw "nixciri: this check's own fixture fails an assertion: ${failedAssertion.message}");
     rendered;
 
   # The one thing every check in checks/output-contract.nix cannot prove: this file evaluates
-  # Nix, not niri, so a rendered config asserting the right THINGS could still contain the wrong
+  # Nix, not the parser, so a rendered config asserting the right things could still contain the wrong
   # STRINGS. Forced here rather than left to the real-binary check below, so a regression back to
-  # bare device names is a clear, named Nix-level failure instead of an opaque "niri rejected the
-  # config" from a validator that has no way to say WHY the directive is wrong -- niri's own
-  # parser accepts a bare name as a syntactically valid (if useless) string argument.
+  # bare device names is a clear, named Nix-level failure instead of an opaque parser rejection.
+  # The inherited parser accepts a bare name as a syntactically valid but useless string.
   rendered'' =
     assert (lib.hasInfix "/dev/dri/by-path/" rendered'
-      || throw "nixniri: the rendered debug block contains no /dev/dri/by-path/* path -- device restriction regressed back to bare names.");
+      || throw "nixciri: the rendered debug block contains no /dev/dri/by-path/* path -- device restriction regressed back to bare names.");
     rendered';
 
-  configFile = pkgs.writeText "niri-fixture-config.kdl" rendered'';
+  configFile = pkgs.writeText "ciri-fixture-config.kdl" rendered'';
 
   # A config that MUST be rejected -- this check's own self-test, same shape as nixscroll's
   # `poison` fixture in checks/config-accepted.nix.
-  poison = pkgs.writeText "niri-poison.kdl" ''
-    bogus-directive-niri-cannot-know true
+  poison = pkgs.writeText "ciri-poison.kdl" ''
+    bogus-directive-ciri-cannot-know true
   '';
 in
-pkgs.runCommand "niri-output-accepted"
+pkgs.runCommand "ciri-output-accepted"
 {
-  nativeBuildInputs = [ niri ];
-  inherit configFile poison;
+  inherit configFile poison validator;
 }
   ''
     set +e
@@ -227,32 +223,32 @@ pkgs.runCommand "niri-output-accepted"
     # Prove the validator actually parses configs in THIS sandbox before believing anything it
     # says about ours -- a green result from a validator that never ran is precisely the failure
     # this check exists to catch, and it is not entitled to exempt itself from it.
-    niri validate -c "$poison" > poison.log 2>&1
+    "$validator" validate -c "$poison" > poison.log 2>&1
     poisonExit=$?
     echo "== poison config (must be REJECTED) =="
     cat poison.log
     if [ "$poisonExit" -eq 0 ]; then
-      echo "FAIL: the self-test config was NOT rejected, so niri never parsed it here."
+      echo "FAIL: the self-test config was NOT rejected, so the validator never parsed it here."
       echo "This check cannot report anything about the real config until that is fixed."
       exit 1
     fi
-    echo "self-test OK: niri rejects a known-bad directive in this environment."
+    echo "self-test OK: the validator rejects a known-bad directive in this environment."
     echo
 
     # ── THE ACTUAL CHECK ───────────────────────────────────────────────────────────────────────
-    echo "== validating the rendered config against $(niri --version) =="
+    echo "== validating the rendered config against $($validator --version) =="
     cat "$configFile"
-    niri validate -c "$configFile" > out.log 2>&1
+    "$validator" validate -c "$configFile" > out.log 2>&1
     goodExit=$?
     cat out.log
     if [ "$goodExit" -ne 0 ]; then
       echo
-      echo "FAIL: niri rejected the config nixniri's structured outputs/layout/session"
-      echo "translator generated. The parse error above names the line; either the option"
-      echo "should not exist, or it renders the wrong spelling."
+      echo "FAIL: the validator rejected nixciri's structured outputs/layout/session config."
+      echo "The parse error above names the line; either the option should not exist,"
+      echo "or it renders the wrong spelling."
       exit 1
     fi
 
-    echo "OK: niri accepts the rendered config."
+    echo "OK: the upstream grammar validator accepts the rendered Ciri config."
     touch $out
   ''

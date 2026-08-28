@@ -1,14 +1,14 @@
-# Evaluates home/niri.nix's structured-output/layout/session seam for real: this is the part of
+# Evaluates home/ciri.nix's structured-output/layout/session seam for real: this is the part of
 # this session's work that replaced a single raw-KDL string with something a registry can key on
 # and a build can assert about, so it is the part with the most SILENT failure modes to close.
 #
 # Mirrors checks/startup-contract.nix's own doctrine (a minimal home-manager stub, not a full
 # instantiation) and nixscroll's checks/startup-contract.nix fact-wiring group (proving
 # lib.probeFact's three states -- absent/resolved/unresolved -- through the REAL module, not just
-# against nixhost's own lib/facts.nix tests). `niriModule` arrives here ALREADY partially applied
+# against nixhost's own lib/facts.nix tests). `ciriModule` arrives here ALREADY partially applied
 # over the real, locked `nixhost.lib.probeFact`/`collectProbes` (see flake.nix) -- this file never
-# reaches for the raw `../home/niri.nix` path.
-{ pkgs, lib ? pkgs.lib, niriModule }:
+# reaches for the raw `../home/ciri.nix` path.
+{ pkgs, lib ? pkgs.lib, ciriModule }:
 let
   stubs = { lib, ... }: {
     options = {
@@ -24,9 +24,9 @@ let
     };
   };
 
-  # ── Minimal stand-ins for nixdesktop's three producer modules ─────────────────────────────────
-  # Deliberately narrow -- just the fields home/niri.nix's own translator actually reads -- not an
-  # attempt to reimplement nixdesktop's own layouts/monitors/session modules (their OWN
+  # ── Minimal stand-ins for nixdisplay and nixdesktop producer modules ────────────────────────
+  # Deliberately narrow -- just the fields home/ciri.nix's own translator actually reads -- not an
+  # attempt to reimplement nixdisplay's layout/monitor modules or nixdesktop's session module
   # assertions, e.g. "monitor slug must exist", are that repo's checks to own, not this one's).
 
   outputEntrySubmodule = lib.types.submodule {
@@ -55,7 +55,7 @@ let
   };
 
   layoutsFixture = { lib, ... }: {
-    options.nixdesktop.layouts = lib.mkOption {
+    options.nixdisplay.layouts = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options.outputs = lib.mkOption { type = lib.types.listOf outputEntrySubmodule; default = [ ]; };
       });
@@ -64,7 +64,7 @@ let
     # One identity-matched entry (the panel this session's whole translation exists for) and one
     # connector-matched, DISABLED entry (the laptop panel, turned off while docked) -- covering
     # both matcher shapes and the `off` flag in a single fixture.
-    config.nixdesktop.layouts.docked.outputs = [
+    config.nixdisplay.layouts.docked.outputs = [
       {
         monitor = "u4323qe";
         match = "identity";
@@ -82,7 +82,7 @@ let
   };
 
   monitorsFixture = { lib, ... }: {
-    options.nixdesktop.monitors = lib.mkOption {
+    options.nixdisplay.monitors = lib.mkOption {
       type = lib.types.attrsOf (lib.types.submodule {
         options = {
           identifier = lib.mkOption { type = lib.types.str; };
@@ -94,9 +94,9 @@ let
       });
       default = { };
     };
-    # A monitor with ONE alias -- the KVM-fed panel case nixdesktop's own docs describe, where the
+    # A monitor with one alias -- the KVM-fed panel case nixdisplay documents, where the
     # same physical panel presents a different EDID identity through a second input.
-    config.nixdesktop.monitors.u4323qe = {
+    config.nixdisplay.monitors.u4323qe = {
       identifier = "Dell Inc. DELL U4323QE 9BQR2P3";
       aliases = [ { identifier = "Dell Inc. DELL U4323QE 9BQR2P3 ALT"; } ];
     };
@@ -127,9 +127,9 @@ let
   };
 
   # Minimal stand-in for nixgpu's `stableDevicePaths.devices` -- just the three fields
-  # home/niri.nix's own `devicePathFor` reads (`address`, `cardPath`, `renderPath`), not nixgpu's
+  # home/ciri.nix's own `devicePathFor` reads (`address`, `cardPath`, `renderPath`), not nixgpu's
   # own vendor/pciId/bus schema or its `cardPath`/`renderPath` THROW-on-no-address derivation
-  # (that behaviour is nixgpu's own to test; this file only has to prove nixniri reads the three
+  # (that behaviour is nixgpu's own to test; this file only has to prove nixciri reads the three
   # fields correctly and asserts sanely when they are missing or incomplete).
   #
   # "ast" (a BMC framebuffer -- `DRIVER_GEM | DRIVER_MODESET` only, no render node, ever) and
@@ -174,28 +174,26 @@ let
     };
   };
 
-  # A fake, minimally-versioned "niri" for the version-assertion tests below -- not a real niri
-  # build (this file's doctrine is Nix inspecting Nix; checks/output-accepted.nix is the one that
-  # spends a real niri build). `pkgs.emptyFile` is already a derivation; `//` only adds the one
+  # A fake, minimally-versioned Ciri package for the version-assertion tests below.
+  # `pkgs.emptyFile` is already a derivation; `//` only adds the one
   # attribute `cfg.package.version` actually reads.
-  fakeNiriPackage = version: pkgs.emptyFile // { inherit version; };
+  fakeCiriPackage = version: pkgs.emptyFile // { inherit version; };
 
-  # The decoy: nixdesktop composed here (a real, unrelated leaf), but `nixdesktop.layouts` was
-  # never imported at all -- the realistic "host imports only nixdesktop's startup contract"
-  # case, and the one probeFact exists to tell apart from a genuine rename.
-  unrelatedNixdesktop = { lib, ... }: {
-    options.nixdesktop.startup = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
-    config.nixdesktop.startup = [ ];
+  # The decoy: nixdisplay is composed through an unrelated leaf, but its layouts module is not.
+  # This is the unresolved state probeFact must distinguish from total namespace absence.
+  unrelatedNixdisplay = { lib, ... }: {
+    options.nixdisplay.roles = lib.mkOption { type = lib.types.attrsOf lib.types.bool; default = { }; };
+    config.nixdisplay.roles = { };
   };
 
-  evalNiri = extra: (lib.evalModules {
-    modules = [ stubs niriModule ] ++ extra;
+  evalCiri = extra: (lib.evalModules {
+    modules = [ stubs ciriModule ] ++ extra;
     specialArgs = { inherit pkgs; };
   }).config;
 
-  render = extra: (evalNiri extra).xdg.configFile."niri/config.kdl".text;
-  warningsOf = extra: (evalNiri extra).warnings;
-  assertionsOf = extra: (evalNiri extra).assertions;
+  render = extra: (evalCiri extra).xdg.configFile."ciri/config.kdl".text;
+  warningsOf = extra: (evalCiri extra).warnings;
+  assertionsOf = extra: (evalCiri extra).assertions;
 
   has = haystack: needle: lib.hasInfix needle haystack;
   failingMessages = assertions: map (a: a.message) (lib.filter (a: !a.assertion) assertions);
@@ -212,13 +210,13 @@ let
     if hits == [ ] then null else builtins.head hits;
   lineAt = text: i: builtins.elemAt (lines text) i;
 
-  base = { nixniri.niri.enable = true; };
+  base = { programs.ciri.enable = true; };
 
   # ── manual `outputs`: block shape, quoting, modeline requoting, transform, off ────────────────
   manualRendered = render [
     base
     {
-      nixniri.niri.outputs = {
+      programs.ciri.outputs = {
         "Dell Inc. DELL U4323QE 9BQR2P3" = {
           mode = "3840x2160@60";
           modeline = "148.50 1920 2008 2052 2200 1080 1084 1089 1125 +hsync +vsync";
@@ -234,46 +232,46 @@ let
   # Every transform value niri's own KDL enum accepts, rendered one at a time -- proving
   # passthrough for ALL of them, not just whichever one the fixtures above happen to pick.
   transformValues = [ "normal" "90" "180" "270" "flipped" "flipped-90" "flipped-180" "flipped-270" ];
-  transformRendered = t: render [ base { nixniri.niri.outputs."DP-1" = { transform = t; }; } ];
+  transformRendered = t: render [ base { programs.ciri.outputs."DP-1" = { transform = t; }; } ];
 
   # ── layout translation: alias variants, connector passthrough, transform passthrough ─────────
-  layoutRendered = render [ base layoutsFixture monitorsFixture { nixniri.niri.layout = "docked"; } ];
+  layoutRendered = render [ base layoutsFixture monitorsFixture { programs.ciri.layout = "docked"; } ];
 
   # ── session translation: denylist + primary render device, resolved to REAL stable paths ──────
-  sessionRendered = render [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
-  sessionWarnings = warningsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
+  sessionRendered = render [ base sessionsFixture stableDevicePathsFixture { programs.ciri.session = "primary"; } ];
+  sessionWarnings = warningsOf [ base sessionsFixture stableDevicePathsFixture { programs.ciri.session = "primary"; } ];
 
   # ── fact-wiring: an unresolvable name is a hard failure, never a silent no-op ─────────────────
-  unknownLayoutAssertions = assertionsOf [ base layoutsFixture { nixniri.niri.layout = "nonexistent"; } ];
-  unknownSessionAssertions = assertionsOf [ base sessionsFixture { nixniri.niri.session = "nonexistent"; } ];
+  unknownLayoutAssertions = assertionsOf [ base layoutsFixture { programs.ciri.layout = "nonexistent"; } ];
+  unknownSessionAssertions = assertionsOf [ base sessionsFixture { programs.ciri.session = "nonexistent"; } ];
 
   # ── fact-wiring: the niri-version gate on the volatile `debug` namespace ───────────────────────
   packageMissingAssertions =
-    assertionsOf [ base sessionsFixture stableDevicePathsFixture { nixniri.niri.session = "primary"; } ];
+    assertionsOf [ base sessionsFixture stableDevicePathsFixture { programs.ciri.session = "primary"; } ];
   packageTooOldAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "primary"; nixniri.niri.package = fakeNiriPackage "24.01"; }
+    { programs.ciri.session = "primary"; programs.ciri.package = fakeCiriPackage "24.01"; }
   ];
   packageOkAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "primary"; nixniri.niri.package = fakeNiriPackage "26.04"; }
+    { programs.ciri.session = "primary"; programs.ciri.package = fakeCiriPackage "26.04"; }
   ];
 
   # ── fact-wiring: a device name that cannot resolve to a stable path is a hard failure too ─────
   orphanDeviceAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "orphan-device"; nixniri.niri.package = fakeNiriPackage "26.04"; }
+    { programs.ciri.session = "orphan-device"; programs.ciri.package = fakeCiriPackage "26.04"; }
   ];
   noAddressAssertions = assertionsOf [
     base sessionsFixture stableDevicePathsFixture
-    { nixniri.niri.session = "no-address-device"; nixniri.niri.package = fakeNiriPackage "26.04"; }
+    { programs.ciri.session = "no-address-device"; programs.ciri.package = fakeCiriPackage "26.04"; }
   ];
 
-  # ── fact-wiring: nixdesktop composed (via an unrelated leaf), layouts genuinely never
+  # ── fact-wiring: nixdisplay composed (via an unrelated leaf), layouts genuinely never
   # imported -- must warn AND fail, because the host explicitly asked for a layout it does not
   # have. This is state (c) from nixhost's own lib/facts.nix, proven through THIS module.
-  renamedWarnings = warningsOf [ base unrelatedNixdesktop { nixniri.niri.layout = "docked"; } ];
-  renamedAssertions = assertionsOf [ base unrelatedNixdesktop { nixniri.niri.layout = "docked"; } ];
+  renamedWarnings = warningsOf [ base unrelatedNixdisplay { programs.ciri.layout = "docked"; } ];
+  renamedAssertions = assertionsOf [ base unrelatedNixdisplay { programs.ciri.layout = "docked"; } ];
 
   # ── the quiet baseline: nothing composed, nothing named -- silent and correct ─────────────────
   quietRendered = render [ base ];
@@ -325,7 +323,7 @@ let
       has layoutRendered ''output "Dell Inc. DELL U4323QE 9BQR2P3 ALT" {'';
     "both identity variants carry the SAME resolved mode" =
       lib.length (lib.filter (l: has l ''mode "3840x2160@60"'') (lines layoutRendered)) >= 2;
-    "a layout's transform passes through unchanged too (niri is counter-clockwise already)" =
+    "a layout's transform passes through unchanged too (Ciri is counter-clockwise already)" =
       has layoutRendered ''transform "90"'';
     "a connector-matched layout entry renders exactly once, by its connector name" =
       has layoutRendered ''output "eDP-1" {'';
@@ -333,7 +331,7 @@ let
 
     # ── session translation: the denylist and the primary render device, as REAL stable paths ──
     # niri reads config.kdl straight off disk (no launcher step resolves anything afterwards),
-    # so a bare device NAME here would restrict nothing at all -- see home/niri.nix's own
+    # so a bare device NAME here would restrict nothing at all -- see home/ciri.nix's own
     # `deviceDebugLines` comment. These are the tests that would have caught that.
     "the primary permitted device becomes render-drm-device, as its real stable path" =
       has sessionRendered ''render-drm-device "/dev/dri/by-path/pci-0000:00:02.0-card"'';
@@ -356,18 +354,18 @@ let
 
     # ── fact-wiring: an unresolvable name is a hard build failure, never a silent no-op ────────
     "naming an undeclared layout fails the build, naming it" =
-      lib.any (m: has m ''"nonexistent"'' && has m "nixniri.niri.layout")
+      lib.any (m: has m ''"nonexistent"'' && has m "programs.ciri.layout")
         (failingMessages unknownLayoutAssertions);
     "naming an undeclared session fails the build, naming it" =
-      lib.any (m: has m ''"nonexistent"'' && has m "nixniri.niri.session")
+      lib.any (m: has m ''"nonexistent"'' && has m "programs.ciri.session")
         (failingMessages unknownSessionAssertions);
 
     # ── fact-wiring: the volatile `debug` namespace is pinned to a real niri VERSION ───────────
-    "a session with no package set fails the build, naming nixniri.niri.package" =
-      lib.any (m: has m "nixniri.niri.package") (failingMessages packageMissingAssertions);
-    "a session on a niri older than 25.11 fails the build, naming both versions" =
+    "a session with no package set fails the build, naming programs.ciri.package" =
+      lib.any (m: has m "programs.ciri.package") (failingMessages packageMissingAssertions);
+    "a session on a Ciri older than 25.11 fails the build, naming both versions" =
       lib.any (m: has m "24.01" && has m "25.11") (failingMessages packageTooOldAssertions);
-    "a session on niri >= 25.11 with a fully-resolved device set passes every assertion" =
+    "a session on Ciri >= 25.11 with a fully-resolved device set passes every assertion" =
       lib.all (a: a.assertion) packageOkAssertions;
 
     # ── fact-wiring: a device name that cannot resolve to a stable path is a hard failure too ──
@@ -378,9 +376,9 @@ let
       lib.any (m: has m ''"unaddressed"'' && has m "address")
         (failingMessages noAddressAssertions);
 
-    # ── fact-wiring: nixdesktop composed elsewhere, layouts genuinely absent -- warn AND fail ──
-    "layouts genuinely absent (nixdesktop composed via an unrelated leaf) warns" =
-      renamedWarnings != [ ] && lib.any (w: has w "nixdesktop.layouts") renamedWarnings;
+    # ── fact-wiring: nixdisplay composed elsewhere, layouts genuinely absent -- warn AND fail ──
+    "layouts genuinely absent (nixdisplay composed via an unrelated leaf) warns" =
+      renamedWarnings != [ ] && lib.any (w: has w "nixdisplay.layouts") renamedWarnings;
     "the same case also fails the build, not just warns" =
       lib.any (a: !a.assertion) renamedAssertions;
 
@@ -388,7 +386,7 @@ let
     "with no layout/session named, nothing warns" = quietWarnings == [ ];
     "with no layout/session named, nothing fails" = lib.all (a: a.assertion) quietAssertions;
     "with no layout/session named, the auto-detect comment is rendered" =
-      has quietRendered "niri auto-detects";
+      has quietRendered "Ciri auto-detects";
     "with no layout/session named, no debug block is rendered" =
       !(has quietRendered "debug {");
 
@@ -404,6 +402,6 @@ if failed == [ ]
 # why a runCommand output path is system-dependent and breaks `--all-systems` on a foreign arch.
 then pkgs.emptyFile
 else throw ''
-  nixniri: the structured output/layout/session seam is broken. Failing assertions:
+  nixciri: the structured output/layout/session seam is broken. Failing assertions:
   ${lib.concatMapStringsSep "\n" (f: "  - ${f}") failed}
 ''
