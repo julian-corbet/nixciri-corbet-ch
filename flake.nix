@@ -1,10 +1,15 @@
 {
-  description = "nixciri — declarative Ciri compositor integration for home-manager";
+  description = "nixciri — declarative Ciri packaging and desktop integration";
 
   inputs = {
-    # This module writes Ciri's config and installs nothing. Platform hubs resolve the runtime
-    # package; desktop-role policy stays in its neutral domain owner.
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # The runtime fork is a separate public product and the only compositor
+    # source this integration packages. flake.lock makes that boundary exact.
+    ciri = {
+      url = "github:corbet-labs/ciri";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
 
     # nixhost IS an input, for exactly one thing: `lib.probeFact`/`lib.collectProbes`
     # (github:julian-corbet/nixhost-corbet-ch, `lib/facts.nix`) -- the shared, plain-function fix
@@ -25,7 +30,7 @@
     };
   };
 
-  outputs = { self, nixpkgs, nixhost }:
+  outputs = { self, nixpkgs, nixhost, ciri }:
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" ];
 
@@ -36,6 +41,41 @@
       ciriModule = import ./home/ciri.nix { inherit (nixhost.lib) probeFact collectProbes; };
     in
     {
+      # ── PACKAGING ───────────────────────────────────────────────────────────────────────────
+      # Ciri already carries the Nix build recipe in its runtime repo. This integration adds a
+      # narrow Arch-safe Mesa wrapper to the compositor executable only; it neither forces the
+      # software renderer nor wraps the IPC client. The launcher descriptor below maps the
+      # compositor-neutral `software` intent to LIBGL_ALWAYS_SOFTWARE.
+      packages = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          mesaEnvironment = {
+            eglVendor = "${pkgs.mesa}/share/glvnd/egl_vendor.d/50_mesa.json";
+            libglDrivers = "${pkgs.mesa}/lib/dri";
+          };
+          ciriPackage = ciri.packages.${system}.ciri.overrideAttrs (old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
+            postFixup = (old.postFixup or "") + ''
+              wrapProgram "$out/bin/ciri" \
+                --set-default __EGL_VENDOR_LIBRARY_FILENAMES "${mesaEnvironment.eglVendor}" \
+                --set-default LIBGL_DRIVERS_PATH "${mesaEnvironment.libglDrivers}"
+            '';
+            passthru = (old.passthru or { }) // {
+              nixciriMesaEnvironment = mesaEnvironment;
+            };
+          });
+        in
+        {
+          ciri = ciriPackage;
+          default = ciriPackage;
+        });
+
+      nixosModules.ciri = import ./modules/nixos.nix { inherit self; };
+      nixosModules.default = self.nixosModules.ciri;
+
+      systemManagerModules.ciri = import ./modules/system-manager.nix { inherit self; };
+      systemManagerModules.default = self.systemManagerModules.ciri;
+
       # ── CONFIG GENERATION ─────────────────────────────────────────────────────────────────
       # A home-manager module that writes one real dotfile and installs no package.
       #
@@ -77,6 +117,11 @@
           pkgs = nixpkgs.legacyPackages.${system};
           src = self;
         };
+
+        arch-integration = import ./checks/arch-integration.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          systemManagerModule = self.systemManagerModules.ciri;
+        };
       }
       # `output-accepted` is NOT part of the uniform `forAllSystems` set above, deliberately —
       # narrowed to x86_64-linux only, the one system this CI actually runs on and can build a
@@ -102,8 +147,19 @@
       // nixpkgs.lib.optionalAttrs (system == "x86_64-linux") {
         output-accepted = import ./checks/output-accepted.nix {
           pkgs = nixpkgs.legacyPackages.${system};
-          upstreamValidator = nixpkgs.legacyPackages.${system}.niri;
+          upstreamValidator = self.packages.${system}.ciri;
           inherit ciriModule;
+        };
+
+        runtime-nested-vm = import ./checks/runtime-nested-vm.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          nixosModule = self.nixosModules.ciri;
+          ciriPackage = self.packages.${system}.ciri;
+        };
+
+        runtime-tty-software-vm = import ./checks/runtime-tty-software-vm.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          ciriPackage = self.packages.${system}.ciri;
         };
       });
 

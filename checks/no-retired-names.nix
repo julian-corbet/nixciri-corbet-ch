@@ -9,7 +9,7 @@ pkgs.runCommand "nixciri-no-retired-names"
     retired='nixniri|home/niri[.]nix|[.]config/niri|niri/config[.]kdl|homeManagerModules[.]niri|NIRI_SOCKET|niri[.]service'
 
     if rg -n --hidden \
-      --glob '!checks/no-retired-names.nix' \
+      --glob '!**/checks/no-retired-names.nix' \
       --glob '!flake.lock' \
       "$retired" "$src"; then
       echo "FAIL: a retired public compositor name remains in nixciri."

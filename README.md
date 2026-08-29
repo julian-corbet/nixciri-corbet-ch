@@ -1,6 +1,6 @@
 # nixciri
 
-Declarative Ciri compositor integration for Home Manager.
+Declarative packaging and desktop integration for Ciri.
 
 `nixciri` generates `~/.config/ciri/config.kdl` from structured Nix options. It
 translates neutral display, session-device, and startup contracts into Ciri's KDL
@@ -13,14 +13,26 @@ The compositor stack has three layers:
 | Layer | Owner | Contains |
 |---|---|---|
 | Runtime | `ciri` | compositor source, renderer and protocol fixes, CLI and runtime identity |
-| Public integration | `nixciri` | config serialization and translation of neutral contracts |
+| Public integration | `nixciri` | pinned package, platform wiring, config serialization and neutral-contract translation |
 | Private values | `ciri.nix` | selected layout, bindings, colors, gaps, rules and host overrides |
 
 This repository intentionally ships no keyboard choice, workspace count,
 bindings, colors, application rules, bar, launcher, OSD, locker, or polkit
-agent. It also installs no package. A platform backend supplies the Ciri runtime
-and passes that derivation through `programs.ciri.package` when version-sensitive
-device restriction is enabled.
+agent. The system modules install the complete public runtime product; the Home
+Manager module still installs nothing and only writes the user's config.
+
+## Packages and system modules
+
+| Export | Purpose |
+|---|---|
+| `packages.<system>.ciri` (`.default`) | exact pinned `corbet-labs/ciri` build with an Arch-safe Nix Mesa/EGL wrapper |
+| `nixosModules.ciri` (`.default`) | installs Ciri, Xwayland Satellite, GNOME/GTK portals and the session entry |
+| `systemManagerModules.ciri` (`.default`) | registers Ciri with nixdesktop and delegates its three external companions to pacman |
+
+The compositor descriptor does not contain a wlroots renderer knob. It maps the
+neutral `software` renderer intent to `LIBGL_ALWAYS_SOFTWARE=1`; the fork then
+accepts software EGL on its real TTY backend and disables dma-buf and DRM leasing
+for that renderer. `auto` and `hardware` do not force an implementation.
 
 ## Module
 
@@ -38,7 +50,7 @@ There are no compatibility aliases. The public API is Ciri-only.
     enable = true;
     layout = "docked";
     session = "primary";
-    package = ciriPackage;
+    package = inputs.nixciri.packages.${pkgs.system}.ciri;
 
     binds."Mod+Return" = {
       action = ''spawn "my-terminal"'';
@@ -77,8 +89,9 @@ sync flags are quoted for KDL while their timing fields remain unchanged.
 Ciri's inherited backend currently expresses device selection through the
 unstable `debug` keys `render-drm-device` and `ignore-drm-device`. The module
 resolves neutral device names to stable paths before writing the config. Setting
-`programs.ciri.session` therefore also requires `programs.ciri.package`; the
-package version is checked rather than trusting a security boundary silently.
+`programs.ciri.session` therefore also requires `programs.ciri.package`; use
+this flake's package so the version check describes the exact compositor that
+will run.
 
 ## Raw escape hatches
 
@@ -98,8 +111,10 @@ The flake checks:
 - evaluate the Home Manager module instead of merely listing it;
 - test startup translation in both composed and standalone states;
 - test output, layout, monitor-alias, transform and device-path translation;
-- feed a broad rendered fixture to the upstream grammar validator inherited by
-  the current Ciri source line;
+- feed a broad rendered fixture to the exact packaged Ciri validator;
+- boot a nested-compositor VM and use only a newly proved Ciri IPC socket;
+- boot a separate TTY/DRM VM and require the software-EGL fallback plus disabled
+  dma-buf/DRM leasing before any host canary;
 - reject retired public names in the repository source.
 
 Run the full suite on the configured build service:
@@ -110,10 +125,9 @@ nix flake check --all-systems
 
 ## Status
 
-Source-preparation only. Ciri is not activated by this repository, and the live
-compositor remains unchanged. Runtime package resolution, compositor registration,
-portal/session integration, and validation against the final Ciri binary are the
-next integration steps once the runtime product is published.
+The public runtime and integration are complete only when the full GitHub Actions
+suite is green. Publishing this repository does not activate Ciri on a host. A
+private platform hub must select it explicitly after those VM gates pass.
 
 ## License
 

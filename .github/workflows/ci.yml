@@ -8,13 +8,21 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: cachix/install-nix-action@v27
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
+            sandbox = true
+
+      - name: Allow NixOS VM tests to use KVM
+        run: |
+          if [ -e /dev/kvm ]; then
+            sudo chmod 0666 /dev/kvm
+          fi
 
       # --all-systems is NOT optional here, and is the whole reason this file spells the command
       # out rather than running a bare `nix flake check`.
@@ -28,4 +36,4 @@ jobs:
       # `systems` in flake.nix is deliberately narrow so this can be strict: only platforms that
       # can genuinely be evaluated are declared, and all of them really are.
       - name: nix flake check (all systems)
-        run: nix flake check --all-systems --print-build-logs
+        run: nix flake check --all-systems --keep-going --print-build-logs
