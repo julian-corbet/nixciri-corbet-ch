@@ -175,7 +175,69 @@ let
           off
       }
     '';
-    programs.ciri.binds."Mod+Y" = ''spawn "true"'';
+    programs.ciri.binds = {
+      "Mod+Y" = ''spawn "true"'';
+      "Mod+Escape" = {
+        action = ''spawn-sh "nixlock -f"'';
+        hotkeyOverlayTitle = "Lock the Session";
+        repeat = false;
+      };
+      "Mod+Down" = "focus-window-or-workspace-down";
+      "Mod+Ctrl+Down" = "move-window-down-or-to-workspace-down";
+      "Mod+Shift+R" = "switch-preset-column-width-back";
+      "Mod+M" = "maximize-window-to-edges";
+      "Mod+Minus" = ''set-column-width "-10%"'';
+      "Mod+V" = "toggle-window-floating";
+      "Ctrl+Print" = "screenshot-screen";
+      "Alt+Print" = "screenshot-window";
+      "Mod+Shift+P" = "power-off-monitors";
+      "XF86AudioRaiseVolume" = {
+        action = ''spawn "swayosd-client" "--output-volume" "raise"'';
+        allowWhenLocked = true;
+      };
+      "Mod+Ctrl+Escape" = {
+        action = "toggle-keyboard-shortcuts-inhibit";
+        allowInhibiting = false;
+        repeat = false;
+      };
+    };
+    programs.ciri.extraTopLevel = ''
+      input {
+          keyboard {
+              xkb {
+                  layout "ch"
+                  variant "de_nodeadkeys"
+              }
+              numlock
+          }
+          touchpad {
+              tap
+              natural-scroll
+          }
+      }
+
+      layout {
+          gaps 6
+          center-focused-column "never"
+          preset-column-widths {
+              proportion 0.25
+              proportion 0.5
+              proportion 0.75
+          }
+          default-column-width { proportion 0.5; }
+          focus-ring {
+              width 2
+              active-color "#B45309"
+              inactive-color "#505050"
+          }
+      }
+
+      hotkey-overlay {
+          skip-at-startup
+      }
+
+      screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
+    '';
   };
 
   evaluated = (lib.evalModules {
