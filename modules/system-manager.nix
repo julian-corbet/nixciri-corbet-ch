@@ -29,6 +29,11 @@ in
   config = lib.mkIf cfg.enable {
     nixdesktop.launcher.compositors.ciri = descriptorFor cfg.package;
 
+    # Keep the seated unit on its exact package path and expose the same Ciri
+    # binary to operators for `ciri msg` and validation. There is no parallel
+    # distro package and therefore no shadow command to retain.
+    environment.systemPackages = [ cfg.package ];
+
     nixarch.packages.pacman = [
       "xdg-desktop-portal-gnome"
       "xdg-desktop-portal-gtk"

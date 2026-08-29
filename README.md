@@ -27,7 +27,7 @@ Manager module still installs nothing and only writes the user's config.
 |---|---|
 | `packages.<system>.ciri` (`.default`) | exact pinned `corbet-labs/ciri` build with an Arch-safe Nix Mesa/EGL wrapper |
 | `nixosModules.ciri` (`.default`) | installs Ciri, companions and the session entry; registers the descriptor when nixdesktop is composed |
-| `systemManagerModules.ciri` (`.default`) | registers Ciri with nixdesktop and delegates its three external companions to pacman |
+| `systemManagerModules.ciri` (`.default`) | exposes Ciri on the system path, registers it with nixdesktop, and delegates its three external companions to pacman |
 
 The compositor descriptor does not contain a wlroots renderer knob. It maps the
 neutral `software` renderer intent to `LIBGL_ALWAYS_SOFTWARE=1`; the fork then

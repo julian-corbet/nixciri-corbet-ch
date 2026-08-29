@@ -14,6 +14,10 @@ let
         type = lib.types.attrsOf lib.types.anything;
         default = { };
       };
+      environment.systemPackages = lib.mkOption {
+        type = lib.types.listOf lib.types.package;
+        default = [ ];
+      };
       environment.etc = lib.mkOption {
         default = { };
         type = lib.types.attrsOf (lib.types.submodule {
@@ -45,6 +49,8 @@ let
     "the selected derivation and Ciri argv form one descriptor" =
       toString descriptor.package == toString fakeCiri
       && descriptor.command == "ciri --session";
+    "the Ciri operator command is on the system path" =
+      enabled.environment.systemPackages == [ fakeCiri ];
     "the descriptor carries only Ciri mechanisms" =
       descriptor.deviceEnvironment == [ ]
       && descriptor.rendererEnvironment.auto == { }
@@ -70,6 +76,7 @@ let
       disabled.nixarch.packages.pacman == [ ]
       && disabled.nixarch.packages.aur == [ ]
       && disabled.nixdesktop.launcher.compositors == { }
+      && disabled.environment.systemPackages == [ ]
       && disabled.environment.etc == { };
   };
 
