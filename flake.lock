@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1787974219,
-        "narHash": "sha256-Ocws9wwRCmGvvtq8X2JJ2BM3fbKdHkLV6+rxDWhn2ck=",
+        "lastModified": 1787976157,
+        "narHash": "sha256-b2EYEbEpWTvCGNEvuf4M5krWJzrZOEuHKGCLNB0uatU=",
         "owner": "corbet-labs",
         "repo": "ciri",
-        "rev": "0ddb90113277c3850941e641cf686a47ba3ecec4",
+        "rev": "a74a540827883f8ca28a6e4e59982d4281522018",
         "type": "github"
       },
       "original": {
