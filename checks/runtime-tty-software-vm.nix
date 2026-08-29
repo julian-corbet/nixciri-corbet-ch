@@ -104,18 +104,33 @@ pkgs.testers.nixosTest {
 
     with subtest("the exact packaged compositor takes the TTY software path"):
         machine.succeed("systemctl start --no-block ciri-tty-vm.service")
-        machine.wait_until_succeeds("systemctl is-active ciri-tty-vm.service")
         machine.wait_until_succeeds(
-            "journalctl -u ciri-tty-vm.service | "
-            "grep -F 'using software EGL renderer as a fallback'"
+            "systemctl is-active --quiet ciri-tty-vm.service "
+            "|| systemctl is-failed --quiet ciri-tty-vm.service",
+            timeout=60,
+        )
+        machine.succeed("systemctl is-active --quiet ciri-tty-vm.service")
+        machine.wait_until_succeeds(
+            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "sed -r 's/\\x1B\\[[0-9;]*[mK]//g' | "
+            "grep -F 'using software EGL renderer as a fallback'",
+            timeout=60,
         )
         machine.succeed(
-            "journalctl -u ciri-tty-vm.service | "
+            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "sed -r 's/\\x1B\\[[0-9;]*[mK]//g' | "
             "grep -F 'software rendering; disabling dma-buf protocol and DRM leasing'"
         )
         machine.wait_until_succeeds(
             "test $(find /run/user/1000 -maxdepth 1 -type s "
-            "-name 'ciri.*.sock' | wc -l) -eq 1"
+            "-name 'ciri.*.sock' | wc -l) -eq 1 "
+            "|| systemctl is-failed --quiet ciri-tty-vm.service",
+            timeout=60,
+        )
+        machine.succeed("systemctl is-active --quiet ciri-tty-vm.service")
+        machine.fail(
+            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "grep -F 'Error::NoDevice'"
         )
         machine.succeed(
             "find /run/user/1000 -maxdepth 1 -type s -name 'ciri.*.sock' "
