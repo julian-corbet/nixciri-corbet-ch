@@ -39,6 +39,7 @@
       # home-manager module function taking the usual `{ lib, config, ... }`; nothing about
       # consuming it changes.
       ciriModule = import ./home/ciri.nix { inherit (nixhost.lib) probeFact collectProbes; };
+      descriptorFor = import ./lib/compositor-descriptor.nix;
     in
     {
       # ── PACKAGING ───────────────────────────────────────────────────────────────────────────
@@ -70,10 +71,10 @@
           default = ciriPackage;
         });
 
-      nixosModules.ciri = import ./modules/nixos.nix { inherit self; };
+      nixosModules.ciri = import ./modules/nixos.nix { inherit self descriptorFor; };
       nixosModules.default = self.nixosModules.ciri;
 
-      systemManagerModules.ciri = import ./modules/system-manager.nix { inherit self; };
+      systemManagerModules.ciri = import ./modules/system-manager.nix { inherit self descriptorFor; };
       systemManagerModules.default = self.systemManagerModules.ciri;
 
       # ── CONFIG GENERATION ─────────────────────────────────────────────────────────────────
@@ -121,6 +122,10 @@
         arch-integration = import ./checks/arch-integration.nix {
           pkgs = nixpkgs.legacyPackages.${system};
           systemManagerModule = self.systemManagerModules.ciri;
+        };
+        nixos-integration = import ./checks/nixos-integration.nix {
+          pkgs = nixpkgs.legacyPackages.${system};
+          nixosModule = self.nixosModules.ciri;
         };
       }
       # `output-accepted` is NOT part of the uniform `forAllSystems` set above, deliberately —

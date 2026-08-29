@@ -36,20 +36,29 @@ let
   # entries are shell command strings, so anything rendered through niri's argv-taking
   # `spawn-at-startup` rather than `spawn-sh-at-startup` would mis-handle this one.
   contract = { lib, ... }: {
-    options.nixdesktop.startup = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [ ];
+    options.nixdesktop = {
+      startup = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+      };
+      session.readinessBridge = {
+        enable = lib.mkOption { type = lib.types.bool; default = false; };
+        serviceName = lib.mkOption { type = lib.types.str; default = ""; };
+        socketEnvironment = lib.mkOption { type = lib.types.str; default = ""; };
+      };
     };
     config.nixdesktop.startup = [ "desktop-component --daemon" "some-agent --flag" ];
   };
 
-  render = extra: (lib.evalModules {
+  evaluate = extra: (lib.evalModules {
     modules = [ stubs ciriModule { programs.ciri.enable = true; } ] ++ extra;
     specialArgs = { inherit pkgs; };
-  }).config.xdg.configFile."ciri/config.kdl".text;
+  }).config;
 
-  withContract = render [ contract ];
-  withoutContract = render [ ];
+  withContractConfig = evaluate [ contract ];
+  withoutContractConfig = evaluate [ ];
+  withContract = withContractConfig.xdg.configFile."ciri/config.kdl".text;
+  withoutContract = withoutContractConfig.xdg.configFile."ciri/config.kdl".text;
 
   has = haystack: needle: lib.hasInfix needle haystack;
 
@@ -64,6 +73,13 @@ let
     # `withoutContract` is a string at all proves it) and must render none of the contract.
     "evaluates and renders nothing extra when nixdesktop is absent" =
       !(has withoutContract "desktop-component");
+
+    "composition selects Ciri's generic readiness bridge without a compatibility alias" =
+      withContractConfig.nixdesktop.session.readinessBridge == {
+        enable = true;
+        serviceName = "ciri";
+        socketEnvironment = "CIRI_SOCKET";
+      };
 
     # POLICY ABSENCE — the integration must not invent desktop furniture or private binds.
     "the public module ships no keybindings" = !(has withoutContract "binds {");

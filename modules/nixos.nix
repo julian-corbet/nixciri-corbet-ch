@@ -1,7 +1,7 @@
 # NixOS installation and portal integration for Ciri. Home configuration is
 # deliberately separate in homeManagerModules.ciri.
-{ self }:
-{ lib, config, pkgs, ... }:
+{ self, descriptorFor }:
+{ lib, config, options, pkgs, ... }:
 let
   cfg = config.programs.ciri;
 in
@@ -18,23 +18,31 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    environment.systemPackages = [
-      cfg.package
-      pkgs.xdg-desktop-portal-gnome
-      pkgs.xdg-desktop-portal-gtk
-      pkgs.xwayland-satellite
-    ];
-
-    services.displayManager.sessionPackages = [ cfg.package ];
-
-    xdg.portal = {
-      enable = true;
-      extraPortals = [
+  config = lib.mkIf cfg.enable (lib.mkMerge [
+    {
+      environment.systemPackages = [
+        cfg.package
         pkgs.xdg-desktop-portal-gnome
         pkgs.xdg-desktop-portal-gtk
+        pkgs.xwayland-satellite
       ];
-      configPackages = [ cfg.package ];
-    };
-  };
+
+      services.displayManager.sessionPackages = [ cfg.package ];
+
+      xdg.portal = {
+        enable = true;
+        extraPortals = [
+          pkgs.xdg-desktop-portal-gnome
+          pkgs.xdg-desktop-portal-gtk
+        ];
+        configPackages = [ cfg.package ];
+      };
+    }
+
+    # Ciri's launch mechanisms are compositor integration data, not
+    # nixdesktop defaults. Standalone use remains a valid system installer.
+    (lib.optionalAttrs (lib.hasAttrByPath [ "nixdesktop" "launcher" "compositors" ] options) {
+      nixdesktop.launcher.compositors.ciri = descriptorFor cfg.package;
+    })
+  ]);
 }

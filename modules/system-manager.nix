@@ -4,7 +4,7 @@
 # only the external desktop services Ciri expects. nixdesktop owns process
 # seating and device fencing; this module contributes one compositor
 # descriptor and no private session values.
-{ self }:
+{ self, descriptorFor }:
 { lib, config, pkgs, ... }:
 let
   cfg = config.nixciri;
@@ -27,19 +27,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    nixdesktop.launcher.compositors.ciri = {
-      package = cfg.package;
-      command = "ciri --session";
-      deviceEnvironment = [ ];
-      rendererEnvironment = {
-        auto = { };
-        hardware = { };
-        software.LIBGL_ALWAYS_SOFTWARE = "1";
-      };
-      supportsVirtualOutputs = false;
-      supportsNotify = true;
-      currentDesktop = "ciri";
-    };
+    nixdesktop.launcher.compositors.ciri = descriptorFor cfg.package;
 
     nixarch.packages.pacman = [
       "xdg-desktop-portal-gnome"

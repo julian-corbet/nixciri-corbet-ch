@@ -14,7 +14,7 @@
 # `nixdesktop.sessions`, `nixgpu.stableDevicePaths.devices`) renders nothing at all on a host
 # that never composed the sibling that owns it, silently and correctly.
 { probeFact, collectProbes }:
-{ lib, config, ... }:
+{ lib, config, options, ... }:
 let
   cfg = config.programs.ciri;
 
@@ -643,7 +643,8 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkMerge [
+    (lib.mkIf cfg.enable {
 
     # ── The seams read through lib.probeFact, both gated on the option that expresses intent ──
     #
@@ -783,5 +784,17 @@ in
 
       ${cfg.extraTopLevel}
     '';
-  };
+    })
+
+    # The generic readiness mechanism belongs to nixdesktop; this compositor integration owns
+    # the Ciri-specific service/socket translation. When nixdesktop's session module is absent,
+    # there is deliberately no definition and standalone config generation remains valid.
+    (lib.optionalAttrs (options ? nixdesktop.session.readinessBridge) {
+      nixdesktop.session.readinessBridge = lib.mkIf cfg.enable {
+        enable = lib.mkDefault true;
+        serviceName = lib.mkDefault "ciri";
+        socketEnvironment = lib.mkDefault "CIRI_SOCKET";
+      };
+    })
+  ];
 }

@@ -37,11 +37,12 @@ pkgs.testers.nixosTest {
         machine.succeed("test -f ${ciriPackage}/share/wayland-sessions/ciri.desktop")
         machine.succeed("test -f ${ciriPackage}/share/xdg-desktop-portal/ciri-portals.conf")
         machine.succeed("command -v xwayland-satellite")
-        machine.succeed("command -v xdg-desktop-portal-gnome")
-        machine.succeed("command -v xdg-desktop-portal-gtk")
+        machine.succeed("test -x ${pkgs.xdg-desktop-portal-gnome}/libexec/xdg-desktop-portal-gnome")
+        machine.succeed("test -x ${pkgs.xdg-desktop-portal-gtk}/libexec/xdg-desktop-portal-gtk")
 
     with subtest("the exact packaged binary accepts the fixture"):
-        machine.succeed("${ciriPackage}/bin/ciri validate -c ${config}")
+        machine.succeed("install -d -m 0700 /run/ciri-validate")
+        machine.succeed("XDG_RUNTIME_DIR=/run/ciri-validate ${ciriPackage}/bin/ciri validate -c ${config}")
 
     with subtest("a disposable parent compositor owns its socket"):
         machine.succeed("install -d -m 0700 /run/ciri-nested-vm")

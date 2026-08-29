@@ -47,7 +47,11 @@ let
       && descriptor.command == "ciri --session";
     "the descriptor carries only Ciri mechanisms" =
       descriptor.deviceEnvironment == [ ]
+      && descriptor.rendererEnvironment.auto == { }
+      && descriptor.rendererEnvironment.hardware == { }
       && descriptor.rendererEnvironment.software.LIBGL_ALWAYS_SOFTWARE == "1"
+      && descriptor.headlessEnvironment == { }
+      && !descriptor.supportsHeadless
       && !descriptor.supportsVirtualOutputs
       && descriptor.supportsNotify
       && descriptor.currentDesktop == "ciri";

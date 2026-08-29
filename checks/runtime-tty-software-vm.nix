@@ -26,6 +26,7 @@ pkgs.testers.nixosTest {
         "input"
         "seat"
         "video"
+        "render"
       ];
     };
 
@@ -50,6 +51,7 @@ pkgs.testers.nixosTest {
           "input"
           "seat"
           "video"
+          "render"
         ];
         PAMName = "login";
         TTYPath = "/dev/tty1";
@@ -93,7 +95,7 @@ pkgs.testers.nixosTest {
 
     with subtest("the VM has an isolated DRM device and software EGL"):
         machine.succeed("test -c /dev/dri/card0")
-        machine.succeed("LIBGL_ALWAYS_SOFTWARE=1 eglinfo -B 2>&1 | tee /run/egl-info")
+        machine.succeed("LIBGL_ALWAYS_SOFTWARE=1 eglinfo -B -p surfaceless 2>&1 | tee /run/egl-info")
         machine.succeed("grep -Ei 'llvmpipe|softpipe|software' /run/egl-info")
         machine.succeed(
             "find /run/user/1000 -maxdepth 1 -type s -name 'ciri.*.sock' "
