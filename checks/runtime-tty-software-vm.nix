@@ -110,14 +110,19 @@ pkgs.testers.nixosTest {
             timeout=60,
         )
         machine.succeed("systemctl is-active --quiet ciri-tty-vm.service")
+        # PAM moves the compositor into the user's session cgroup, so journald
+        # does not reliably retain ciri-tty-vm.service as `_SYSTEMD_UNIT` even
+        # though systemd still owns and supervises the process. This disposable
+        # VM runs exactly one Ciri process; query the boot journal so the gate
+        # follows that process across the PAM cgroup transition.
         machine.wait_until_succeeds(
-            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "journalctl -b -o cat --no-pager | "
             "sed -r 's/\\x1B\\[[0-9;]*[mK]//g' | "
             "grep -F 'using software EGL renderer as a fallback'",
             timeout=60,
         )
         machine.succeed(
-            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "journalctl -b -o cat --no-pager | "
             "sed -r 's/\\x1B\\[[0-9;]*[mK]//g' | "
             "grep -F 'software rendering; disabling dma-buf protocol and DRM leasing'"
         )
@@ -129,7 +134,7 @@ pkgs.testers.nixosTest {
         )
         machine.succeed("systemctl is-active --quiet ciri-tty-vm.service")
         machine.fail(
-            "journalctl -u ciri-tty-vm.service -o cat --no-pager | "
+            "journalctl -b -o cat --no-pager | "
             "grep -F 'Error::NoDevice'"
         )
         machine.succeed(
